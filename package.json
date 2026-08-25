@@ -36,6 +36,7 @@
     "react-hook-form": "^7.75.0",
     "resend": "^6.12.2",
     "tailwind-merge": "^3.5.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {

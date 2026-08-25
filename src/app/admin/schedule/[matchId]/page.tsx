@@ -99,8 +99,11 @@ export default async function SchedulePrint({
         ))}
         {timeline.length === 0 ? (
           <li className="text-sm text-zinc-500">
-            No schedule blocks found for the host on this date. Upload the host&rsquo;s
-            schedule for {match.shadowDate}.
+            No schedule blocks found for the host on this date. Either they
+            haven&rsquo;t saved a calendar link at <code>/me</code> yet, their
+            calendar has nothing on {match.shadowDate}, or it just hasn&rsquo;t
+            been synced for this date yet — try the &ldquo;Refresh
+            schedules&rdquo; button on the Schedules tab.
           </li>
         ) : null}
       </ol>

@@ -43,7 +43,10 @@ export async function getMatchDetail(matchId: string): Promise<MatchDetail | nul
         .limit(1))[0] ?? null
     : null;
 
-  // Host's blocks for the shadow date.
+  // Host's blocks for the shadow date — a plain DB read. This reflects
+  // whatever was last synced from the host's calendar (during a matching
+  // run, or an explicit refresh on the schedule comparison tab), not a live
+  // fetch on every view.
   let hostBlocks: HostBlockInput[] = [];
   if (host) {
     const [day] = await db

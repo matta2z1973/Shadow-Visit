@@ -18,6 +18,7 @@ import {
   type RankedMatch,
 } from "./engine";
 import { courseCoveredInterestIds, type InterestRef } from "./course-map";
+import { syncSchedulesForDate } from "@/lib/schedule/ics-sync";
 
 export async function getSoftCap(): Promise<number> {
   const [row] = await db
@@ -75,6 +76,7 @@ export type MatchData = {
   hosts: HostRow[];
   interestName: Map<string, string>;
   rankings: RankedMatch[];
+  scheduleErrors: { hostName: string; message: string }[];
 };
 
 export async function getMatchDataForDate(date: string): Promise<MatchData> {
@@ -121,7 +123,14 @@ export async function getMatchDataForDate(date: string): Promise<MatchData> {
       })),
   }));
 
-  // --- Hosts with a schedule on this date ---
+  // --- Sync every calendar-linked host's schedule for this date, then read
+  // it back like any other DB-backed page. This is the only network fetch in
+  // the whole matching flow — everything downstream is a plain DB read.
+  const syncResults = await syncSchedulesForDate(date);
+  const scheduleErrors = syncResults
+    .filter((r) => r.status === "error")
+    .map((r) => ({ hostName: r.hostName, message: r.message ?? "Couldn't read calendar feed." }));
+
   const dayRows = await db
     .select()
     .from(hostScheduleDays)
@@ -205,5 +214,5 @@ export async function getMatchDataForDate(date: string): Promise<MatchData> {
 
   const rankings = assignBulk(engineProspectives, engineHosts, { hostSoftCap: softCap });
 
-  return { date, softCap, prospectives, hosts, interestName, rankings };
+  return { date, softCap, prospectives, hosts, interestName, rankings, scheduleErrors };
 }

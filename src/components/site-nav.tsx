@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
+import { viewAsStudent, viewAsAdmin } from "@/app/view-as-actions";
 
 const linkCls =
   "text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100";
@@ -69,6 +70,27 @@ export default async function SiteNav() {
             <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
               admin
             </span>
+          ) : null}
+          {user.actualRole === "admin" ? (
+            isAdmin ? (
+              <form action={viewAsStudent}>
+                <button
+                  type="submit"
+                  className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                >
+                  View as student
+                </button>
+              </form>
+            ) : (
+              <form action={viewAsAdmin}>
+                <button
+                  type="submit"
+                  className="rounded bg-amber-500 px-2 py-1 text-xs font-medium text-white hover:bg-amber-600"
+                >
+                  Viewing as student — back to admin
+                </button>
+              </form>
+            )
           ) : null}
           <form action="/logout" method="post">
             <button type="submit" className="underline-offset-4 hover:underline">

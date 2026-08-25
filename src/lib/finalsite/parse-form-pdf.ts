@@ -31,6 +31,8 @@ export type ParsedVisitForm = {
   scheduleChoice: string | null; // "Interview Only" | "Shadow Visit/Interview" ...
   wantsShadow: boolean;
   shadowDate: string | null; // YYYY-MM-DD, if a shadow day was chosen
+  shadowStart: string | null; // HH:MM:SS, if the form included a time window
+  shadowEnd: string | null; // HH:MM:SS
   interviewDate: string | null; // YYYY-MM-DD
   interviewStart: string | null; // HH:MM:SS
   interviewEnd: string | null; // HH:MM:SS
@@ -91,7 +93,7 @@ function valueForLabel(
   return valueAt(tokens, l.y, l.page, col, span);
 }
 
-function parseGrade(raw: string | null): number | null {
+export function parseGrade(raw: string | null): number | null {
   if (!raw) return null;
   const m = raw.match(/(\d{1,2})/);
   return m ? parseInt(m[1], 10) : null;
@@ -189,9 +191,14 @@ export function parseInterviewVisitForm(tokens: Token[]): ParsedVisitForm {
     )
     .sort((a, b) => a.x - b.x)[0];
   let shadowDate: string | null = null;
+  let shadowStart: string | null = null;
+  let shadowEnd: string | null = null;
   if (shadowLabel) {
     const raw = valueAt(tokens, shadowLabel.y, shadowLabel.page, LEFT, 14);
-    shadowDate = parseHumanDate(raw).date;
+    const parsedShadow = parseHumanDate(raw);
+    shadowDate = parsedShadow.date;
+    shadowStart = parsedShadow.start;
+    shadowEnd = parsedShadow.end;
   } else if (wantsShadow) {
     warnings.push(
       "Applicant chose a shadow visit but no shadow-date field was found — confirm the label.",
@@ -238,6 +245,8 @@ export function parseInterviewVisitForm(tokens: Token[]): ParsedVisitForm {
     scheduleChoice,
     wantsShadow,
     shadowDate,
+    shadowStart,
+    shadowEnd,
     interviewDate: interview.date,
     interviewStart: interview.start,
     interviewEnd: interview.end,

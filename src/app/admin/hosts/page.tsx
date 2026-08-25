@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import {
   hostStudents,
   hostStudentInterests,
+  hostScheduleDays,
   matches,
   appSettings,
   interests,
@@ -31,7 +32,7 @@ export default async function HostsPage() {
   await requireAdmin();
   const softCap = await getSoftCap();
 
-  const [hosts, allInterests, hostInterestRows, counts] = await Promise.all([
+  const [hosts, allInterests, hostInterestRows, counts, scheduleCounts] = await Promise.all([
     db.select().from(hostStudents).orderBy(asc(hostStudents.fullName)),
     db
       .select()
@@ -44,8 +45,13 @@ export default async function HostsPage() {
       .from(matches)
       .where(inArray(matches.status, ["confirmed", "sent"]))
       .groupBy(matches.hostStudentId),
+    db
+      .select({ hostStudentId: hostScheduleDays.hostStudentId, n: sql<number>`count(*)::int` })
+      .from(hostScheduleDays)
+      .groupBy(hostScheduleDays.hostStudentId),
   ]);
   const countMap = new Map(counts.map((c) => [c.hostStudentId, c.n]));
+  const scheduleCountMap = new Map(scheduleCounts.map((c) => [c.hostStudentId, c.n]));
 
   // Summary counts by grade (desc) and gender.
   const byGrade = new Map<number, number>();
@@ -61,6 +67,11 @@ export default async function HostsPage() {
     else noGender++;
   }
   const gradesDesc = [...byGrade.entries()].sort((a, b) => b[0] - a[0]);
+  // A host has a schedule if they've saved a calendar link (the live,
+  // going-forward path) or have legacy CSV-imported rows on file.
+  const hasSchedule = (id: string, icsUrl: string | null) =>
+    !!icsUrl || !!scheduleCountMap.get(id);
+  const missingSchedule = hosts.filter((h) => !hasSchedule(h.id, h.icsUrl)).length;
 
   const interestsFor = (hostId: string) =>
     new Set(hostInterestRows.filter((r) => r.hostStudentId === hostId).map((r) => r.interestId));
@@ -111,6 +122,22 @@ export default async function HostsPage() {
                   Unset: <strong>{noGender}</strong>
                 </span>
               ) : null}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Schedules
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-2 text-sm">
+              {missingSchedule > 0 ? (
+                <span className="rounded bg-amber-100 px-2 py-0.5 font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                  {missingSchedule} haven&rsquo;t saved a calendar link
+                </span>
+              ) : (
+                <span className="rounded bg-white px-2 py-0.5 text-zinc-500 dark:bg-zinc-800">
+                  All hosts have a calendar link on file
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -166,6 +193,11 @@ export default async function HostsPage() {
                     {over ? (
                       <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
                         at/over cap
+                      </span>
+                    ) : null}
+                    {!hasSchedule(h.id, h.icsUrl) ? (
+                      <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                        no calendar link
                       </span>
                     ) : null}
                   </span>

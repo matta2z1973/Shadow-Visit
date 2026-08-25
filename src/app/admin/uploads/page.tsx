@@ -4,6 +4,7 @@ import { importBatches } from "@/lib/db/schema";
 import { desc } from "drizzle-orm";
 import HostUploadForm from "./host-upload-form";
 import ProspectiveUploadForm from "./prospective-upload-form";
+import ProspectiveReportUploadForm from "./prospective-report-upload-form";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,18 @@ export default async function UploadsPage() {
           matching.
         </p>
         <ProspectiveUploadForm />
+      </section>
+
+      <section className={`${card} mt-6`}>
+        <h2 className="text-lg font-semibold">Prospective students (bulk report)</h2>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Upload a FinalSite bulk report (.xlsx) — one row per applicant, covering
+          many students at once. Reads name, grade, current school, visit date,
+          and up to two ranked interests. This report has no gender column, so
+          gender is left blank for admin fill-in; add it on the prospective's
+          record before matching runs (gender is a hard filter).
+        </p>
+        <ProspectiveReportUploadForm />
       </section>
 
       <section className={`${card} mt-6 opacity-70`}>

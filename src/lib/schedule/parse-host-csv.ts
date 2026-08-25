@@ -113,7 +113,7 @@ function splitCourse(raw: string): { title: string | null; code: string | null }
   return { title: trimmed, code: null };
 }
 
-const ACADEMIC_BLOCK = /^([A-H])\s*Block$/i;
+export const ACADEMIC_BLOCK = /^([A-H])\s*Block$/i;
 
 const HEADER = ["course", "start time", "end time", "room", "block", "teacher"];
 

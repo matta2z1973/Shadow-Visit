@@ -120,6 +120,10 @@ export const hostStudents = pgTable(
     gradYear: integer("grad_year"), // e.g. 2028 (the '28 in the export)
     grade: integer("grade"), // e.g. 11
     gender: gender("gender"),
+    // Personal Outlook/Exchange "Publish a calendar" ICS feed URL — fetched
+    // live wherever a schedule is needed (matching, schedule comparison, the
+    // per-match printable timeline), never stored. Set by the student at /me.
+    icsUrl: text("ics_url"),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -204,6 +208,11 @@ export const prospectiveStudents = pgTable(
     gender: gender("gender"),
     currentSchool: text("current_school"),
     shadowDate: date("shadow_date"),
+    // The visit's scheduled time window (e.g. FinalSite bulk report rows carry
+    // "7:45AM - 1:00PM" alongside the date). Distinct from interview start/end
+    // below, which is a separate slot the family picks on the PDF form.
+    shadowStart: time("shadow_start"),
+    shadowEnd: time("shadow_end"),
     wantsShadow: boolean("wants_shadow").notNull().default(false),
     scheduleChoice: text("schedule_choice"), // "Interview Only" | "Shadow Visit/Interview" ...
     // Interview slot the family selected on the form (admin can override).

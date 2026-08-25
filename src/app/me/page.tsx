@@ -1,40 +1,13 @@
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import {
-  hostStudents,
-  hostStudentInterests,
-  interests,
-} from "@/lib/db/schema";
+import { hostStudentInterests, interests } from "@/lib/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
+import { getOrCreateHost } from "@/lib/hosts";
 import InterestsForm from "./interests-form";
+import ScheduleLinkForm from "./schedule-link-form";
 
 export const dynamic = "force-dynamic";
-
-async function getOrCreateHost(user: {
-  id: string;
-  firstName: string | null;
-  lastName: string | null;
-  fullName: string | null;
-}) {
-  const [existing] = await db
-    .select()
-    .from(hostStudents)
-    .where(eq(hostStudents.profileId, user.id))
-    .limit(1);
-  if (existing) return existing;
-
-  const [created] = await db
-    .insert(hostStudents)
-    .values({
-      profileId: user.id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      fullName: user.fullName ?? "Unknown",
-    })
-    .returning();
-  return created;
-}
 
 export default async function MePage() {
   const user = await requireUser();
@@ -71,6 +44,17 @@ export default async function MePage() {
         groups={groups}
         selectedIds={selectedIds}
       />
+
+      <div className="mt-10 border-t border-zinc-200 pt-6 dark:border-zinc-800">
+        <h2 className="text-lg font-semibold">My schedule</h2>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Paste your Outlook calendar&rsquo;s subscribe link (the one ending in{" "}
+          <code>.ics</code>, from Outlook&rsquo;s Calendar settings →
+          &ldquo;Publish a calendar&rdquo;) so we always know when you&rsquo;re
+          free to host — one time, no need to re-upload anything later.
+        </p>
+        <ScheduleLinkForm currentUrl={host.icsUrl} />
+      </div>
     </main>
   );
 }

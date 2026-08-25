@@ -1,8 +1,15 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
 import { profiles } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+
+// Lets an admin preview the student portal without changing their real
+// permissions. Only ever downgrades the *displayed* role for admins — a
+// student forging this cookie gains nothing, since their real role still
+// gates every admin-only check.
+export const VIEW_AS_COOKIE = "svp_view_as";
 
 export type AppUser = {
   id: string;
@@ -11,6 +18,7 @@ export type AppUser = {
   lastName: string | null;
   fullName: string | null;
   role: "student" | "admin";
+  actualRole: "student" | "admin";
 };
 
 export async function getCurrentUser(): Promise<AppUser | null> {
@@ -27,13 +35,20 @@ export async function getCurrentUser(): Promise<AppUser | null> {
     .limit(1);
   if (!profile) return null;
 
+  let role: AppUser["role"] = profile.role;
+  if (profile.role === "admin") {
+    const store = await cookies();
+    if (store.get(VIEW_AS_COOKIE)?.value === "student") role = "student";
+  }
+
   return {
     id: profile.id,
     email: profile.email,
     firstName: profile.firstName,
     lastName: profile.lastName,
     fullName: profile.fullName,
-    role: profile.role,
+    role,
+    actualRole: profile.role,
   };
 }
 

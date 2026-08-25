@@ -15,7 +15,7 @@ export type BusyInterval = {
 
 // Unfold RFC-5545 continuation lines (a line starting with space/tab continues
 // the previous one).
-function unfold(text: string): string[] {
+export function unfold(text: string): string[] {
   const raw = text.replace(/\r\n?/g, "\n").split("\n");
   const out: string[] = [];
   for (const line of raw) {

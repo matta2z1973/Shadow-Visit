@@ -91,6 +91,15 @@ export default async function MatchPage({
         </div>
       </div>
 
+      {data.scheduleErrors.length ? (
+        <div className="mt-3 rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+          Couldn&rsquo;t load {data.scheduleErrors.length} host calendar feed
+          {data.scheduleErrors.length === 1 ? "" : "s"} — they were left out
+          of matching for this date:{" "}
+          {data.scheduleErrors.map((e) => e.hostName).join(", ")}
+        </div>
+      ) : null}
+
       <div className="mt-3 flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
         <span>{data.prospectives.length} prospective(s)</span>
         <span>{data.hosts.length} host(s) scheduled this date</span>
