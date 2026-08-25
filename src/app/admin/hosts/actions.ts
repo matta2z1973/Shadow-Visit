@@ -74,3 +74,25 @@ export async function deleteHost(formData: FormData) {
   await db.delete(hostStudents).where(eq(hostStudents.id, id.data));
   revalidatePath("/admin/hosts");
 }
+
+const feedSchema = z.object({
+  id: z.string().uuid(),
+  icsUrl: z.string().trim().url().optional().or(z.literal("")),
+});
+
+// Lets an admin set/edit a host's calendar link directly (same pattern as
+// staff's calendarFeedUrl) — most hosts will paste their own at /me, but
+// this covers admins entering it on a host's behalf.
+export async function setHostFeed(formData: FormData) {
+  await requireAdmin();
+  const parsed = feedSchema.safeParse({
+    id: formData.get("id"),
+    icsUrl: formData.get("icsUrl") || "",
+  });
+  if (!parsed.success) return;
+  await db
+    .update(hostStudents)
+    .set({ icsUrl: parsed.data.icsUrl || null })
+    .where(eq(hostStudents.id, parsed.data.id));
+  revalidatePath("/admin/hosts");
+}

@@ -1,9 +1,8 @@
+import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { importBatches } from "@/lib/db/schema";
 import { desc } from "drizzle-orm";
-import HostUploadForm from "./host-upload-form";
-import ProspectiveUploadForm from "./prospective-upload-form";
 import ProspectiveReportUploadForm from "./prospective-report-upload-form";
 
 export const dynamic = "force-dynamic";
@@ -24,27 +23,25 @@ export default async function UploadsPage() {
       <h1 className="text-2xl font-semibold tracking-tight">Uploads</h1>
 
       <section className={`${card} mt-6`}>
-        <h2 className="text-lg font-semibold">Host schedules (Blackbaud)</h2>
+        <h2 className="text-lg font-semibold">Host schedules</h2>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Upload one &ldquo;Student Schedule for the Day&rdquo; CSV per host —
-          select several at once. Re-uploading a host+date replaces it.
+          No file to upload here anymore — each host saves their Outlook
+          calendar link on the{" "}
+          <Link href="/admin/hosts" className="underline">
+            Hosts page
+          </Link>{" "}
+          (either themselves at <code>/me</code>, or you can enter it for them
+          there). Schedules sync from that link automatically whenever
+          matching runs, or on demand from the{" "}
+          <Link href="/admin/hosts/schedules" className="underline">
+            Schedules
+          </Link>{" "}
+          tab&rsquo;s refresh button.
         </p>
-        <HostUploadForm />
       </section>
 
       <section className={`${card} mt-6`}>
         <h2 className="text-lg font-semibold">Prospective students (FinalSite)</h2>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Upload one or more &ldquo;Interview and Visit Form&rdquo; PDFs. We read
-          grade, gender, ranked interests, academic interest, shadow date, and the
-          family-selected interview slot. Assign the admissions counselor during
-          matching.
-        </p>
-        <ProspectiveUploadForm />
-      </section>
-
-      <section className={`${card} mt-6`}>
-        <h2 className="text-lg font-semibold">Prospective students (bulk report)</h2>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           Upload a FinalSite bulk report (.xlsx) — one row per applicant, covering
           many students at once. Reads name, grade, current school, visit date,

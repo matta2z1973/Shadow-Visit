@@ -11,9 +11,28 @@ import {
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import HostsTabs from "@/components/hosts-tabs";
-import { updateHost, setHostInterests, deleteHost } from "./actions";
+import { updateHost, setHostInterests, deleteHost, setHostFeed } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+function FeedForm({ id, url }: { id: string; url: string | null }) {
+  return (
+    <form action={setHostFeed} className="mt-2 flex items-center gap-2">
+      <input type="hidden" name="id" value={id} />
+      <input
+        name="icsUrl"
+        type="url"
+        defaultValue={url ?? ""}
+        placeholder="Calendar .ics link (Outlook: Publish a calendar → titles and locations)"
+        className="flex-1 rounded-md border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+      />
+      <button type="submit" className="text-xs text-zinc-500 underline-offset-2 hover:underline">
+        save link
+      </button>
+      {url ? <span className="text-xs text-green-600">●</span> : null}
+    </form>
+  );
+}
 
 async function getSoftCap(): Promise<number> {
   const [row] = await db
@@ -202,6 +221,8 @@ export default async function HostsPage() {
                     ) : null}
                   </span>
                 </form>
+
+                <FeedForm id={h.id} url={h.icsUrl} />
 
                 <details className="mt-3 rounded-md border border-zinc-200 dark:border-zinc-800">
                   <summary className="cursor-pointer px-3 py-2 text-sm font-medium">

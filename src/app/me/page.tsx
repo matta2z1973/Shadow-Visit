@@ -39,14 +39,19 @@ export default async function MePage() {
         Tell us a bit about yourself so we can match you with the right shadow
         visitors.
       </p>
-      <InterestsForm
-        host={{ grade: host.grade, gender: host.gender }}
-        groups={groups}
-        selectedIds={selectedIds}
-      />
 
-      <div className="mt-10 border-t border-zinc-200 pt-6 dark:border-zinc-800">
-        <h2 className="text-lg font-semibold">My schedule</h2>
+      <div className="mt-6 rounded-lg border border-zinc-200 p-5 dark:border-zinc-800">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">My schedule</h2>
+          <a
+            href="https://claude.ai/code/artifact/27730909-9dd0-4697-898b-79fb011c746c"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            <span aria-hidden>❓</span> Help me find this
+          </a>
+        </div>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           Paste your Outlook calendar&rsquo;s subscribe link (the one ending in{" "}
           <code>.ics</code>, from Outlook&rsquo;s Calendar settings →
@@ -54,6 +59,14 @@ export default async function MePage() {
           free to host — one time, no need to re-upload anything later.
         </p>
         <ScheduleLinkForm currentUrl={host.icsUrl} />
+      </div>
+
+      <div className="mt-10 border-t border-zinc-200 pt-6 dark:border-zinc-800">
+        <InterestsForm
+          host={{ grade: host.grade, gender: host.gender }}
+          groups={groups}
+          selectedIds={selectedIds}
+        />
       </div>
     </main>
   );

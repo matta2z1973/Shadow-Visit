@@ -39,8 +39,43 @@ Built on the same stack as the school's coverage-planner app.
   new admin/student view toggle all confirmed working.
 - One real user account exists and is provisioned as admin:
   `abbondanziom@greenhill.org`.
-- Uncommitted local changes exist (see Git status below) — nothing has been
-  committed or pushed to `origin/main` yet.
+- All local work through 2026-08-25 is **committed and pushed** to
+  `origin/main` (commit `143a566`) — view-as-student toggle, bulk FinalSite
+  import, and the Outlook-synced host schedules. Working tree is clean
+  except the three untracked real-data sample files (see Secrets section).
+- **Deployed to production** (2026-08-25): https://shadow-visit-platform.vercel.app
+  — see the Deployment section below.
+
+## Deployment
+
+Live at **https://shadow-visit-platform.vercel.app** (Vercel project
+`matts-projects-c8866403/shadow-visit-platform`, account `mabbondanzio-1166`,
+created 2026-08-25 — first deploy ever for this repo, via `vercel link` +
+`vercel deploy --prod` using the account's `VERCEL_TOKEN`).
+
+- **`vercel link` auto-connected the GitHub repo** — Vercel's Git integration
+  is now active, meaning **every future `git push` to `origin/main` will
+  trigger its own production deployment automatically**, independent of any
+  manual `vercel deploy`. This wasn't true before today. Worth remembering
+  before casually pushing — "just a push" now also means "also goes live."
+- Production env vars are set directly on Vercel (`vercel env ls production`
+  to check), copied from `.env.local` at deploy time — not derived from
+  anything in git. If they ever need updating, use `vercel env add <NAME>
+  production --value "..." --force` (add `--no-sensitive` for the two
+  `NEXT_PUBLIC_*` ones — they're meant to be public/client-visible, and
+  Vercel rejects `NEXT_PUBLIC_*` vars set to secret visibility on
+  Production/Preview).
+- `DATABASE_URL` uses the same Supabase IPv4 pooler string as local dev —
+  untested whether Vercel's serverless functions would have reached the
+  direct hostname fine on their own (they very well might, unlike this local
+  network), but no reason to find out since the pooler string already works.
+- `.env.local` gained a `VERCEL_OIDC_TOKEN` line from `vercel link` — a
+  Vercel-issued local-dev token, harmless, still git-ignored like everything
+  else in that file.
+- This deploy reaches the **same live Supabase project** used for local dev
+  — there's only one environment, not separate prod/dev databases. Real
+  student data flows through both equally; there's no staging DB to test
+  against instead.
 
 ## Local environment quirks (hard-won, don't re-debug these)
 
@@ -220,48 +255,80 @@ prior chat history — they are intentionally not duplicated anywhere in git.
      — `host ICS.ics` and `host schedule by block.xls` — both contain
      real-looking student data; don't commit them (same caution as
      `Test Report-test.xlsx`).
+6. **`/admin/uploads` cleaned up to match reality** (2026-08-25, after
+   deploy). Two changes:
+   - **Host schedules card** no longer has a CSV upload form — there's
+     nothing to upload anymore now that item 5 moved schedules to calendar
+     links. Replaced with a pointer to `/admin/hosts` (where the link now
+     lives — see next bullet) and `/admin/hosts/schedules` (the refresh
+     button). `host-upload-form.tsx` and its `uploadHostSchedules` action in
+     `admin/uploads/actions.ts` still exist and still work, just aren't
+     reachable from any page anymore — not deleted, since the legacy-CSV
+     fallback path in `ics-sync.ts`'s reads still depends on that data shape
+     existing for hosts without a saved link.
+   - **`/admin/hosts` now has an editable calendar-link field per host**
+     (`FeedForm` in `page.tsx` + new `setHostFeed` action in `actions.ts`),
+     mirroring the Staff page's `calendarFeedUrl` field/pattern exactly. Most
+     hosts will still set their own via `/me`, but this lets an admin set or
+     fix one directly.
+   - **Prospective students consolidated to one section** — dropped the PDF
+     "Interview and Visit Form" upload card from the page entirely, per
+     explicit request ("we just need a single section to upload the xls
+     file from finalsite"). Only the bulk `.xlsx` upload is shown now.
+     `prospective-upload-form.tsx` and the `uploadProspectiveForms` PDF
+     action still exist (not deleted, same reasoning as above) but are now
+     unreachable from the UI — if the PDF path is truly done for good,
+     those files are safe to delete outright next time this area gets
+     touched.
+7. **`/me` reordered + a help guide for getting the calendar link**
+   (2026-08-25). The "My schedule" box now sits *above* "My interests" (was
+   getting lost at the bottom) — same components, `ScheduleLinkForm` just
+   moved earlier in `page.tsx`, `InterestsForm` now renders inside its own
+   `mt-10 border-t` block below it.
+   - Added a **"❓ Help me find this"** link next to the schedule heading. No
+     suitable pre-made tutorial video exists (searched — the only close
+     YouTube hit was about emailing a single calendar invite, a different
+     topic that would confuse students), so built a step-by-step visual
+     guide instead: an Artifact page at
+     https://claude.ai/code/artifact/27730909-9dd0-4697-898b-79fb011c746c
+     (source: `outlook-ics-guide.html`, not part of the repo — a
+     standalone published page, hardcoded into `page.tsx`'s href). Covers
+     the exact flow verified against a real feed earlier this session:
+     outlook.office.com → Settings → Calendar → Shared calendars → Publish
+     a calendar → "Can view titles and locations" → copy the `.ics` link,
+     not the `.html` one.
+   - **If the user records a real screen-capture video later**, swap that
+     href in `src/app/me/page.tsx` for the video URL instead — the artifact
+     was explicitly a stand-in, not a rejection of the original "video" ask.
 
-## Git status (uncommitted, unpushed)
+## Git status
+
+Base is **committed and pushed to `origin/main`** as of 2026-08-25, commit
+`143a566` ("Add view-as-student toggle, bulk prospective import, and synced
+host schedules"). On top of that, items 6-7 above (the `/admin/uploads`
+cleanup and the `/me` reorder + help guide) are done locally but **not yet
+committed/pushed** — remember: since `vercel link` connected this repo, the
+next push will also trigger a live production deploy automatically, so
+mention that before pushing again, not just before deploying.
 
 ```
- M package-lock.json
- M package.json
+ M src/app/admin/hosts/actions.ts
  M src/app/admin/hosts/page.tsx
- M src/app/admin/hosts/schedules/page.tsx
- M src/app/admin/match/page.tsx
- M src/app/admin/schedule/[matchId]/page.tsx
  M src/app/admin/uploads/page.tsx
- M src/app/admin/uploads/prospective-actions.ts
  M src/app/me/page.tsx
- M src/components/site-nav.tsx
- M src/lib/auth.ts
- M src/lib/db/schema.ts
- M src/lib/finalsite/parse-form-pdf.ts
- M src/lib/ics-parse.ts
- M src/lib/matching/loader.ts
- M src/lib/matching/match-detail.ts
- M src/lib/schedule/parse-host-csv.ts
-?? README.md
-?? "Test Report-test.xlsx"        (real-looking student data — don't commit)
-?? "host ICS.ics"                 (real-looking student data — don't commit)
-?? "host schedule by block.xls"   (real-looking student data — don't commit)
-?? src/app/admin/hosts/schedules/actions.ts
-?? src/app/admin/hosts/schedules/refresh-schedules-form.tsx
-?? src/app/admin/uploads/prospective-report-upload-form.tsx
-?? src/app/me/schedule-actions.ts
-?? src/app/me/schedule-link-form.tsx
-?? src/app/view-as-actions.ts
-?? src/lib/finalsite/parse-prospective-report.ts
-?? src/lib/hosts.ts
-?? src/lib/schedule/ics-sync.ts
-?? src/lib/schedule/parse-host-ics.ts
+?? "Test Report-test.xlsx"        (real-looking student data — never commit)
+?? "host ICS.ics"                 (real-looking student data — never commit)
+?? "host schedule by block.xls"   (real-looking student data — never commit)
 ```
 
-Nothing has been committed or pushed — ask the user before doing either (per
-standing policy: never commit or push without explicit ask). If/when
-committing, deliberately exclude all three sample data files above (real
-student PII in plain repo files, not under the gitignored `/fixtures/`
-convention).
+These three are deliberately excluded from every commit (staged with
+`git add -A -- ':!<file>' ...` pathspec exclusions, not just "forgot to add
+them") — real student PII sitting in plain repo-root files, not under the
+gitignored `/fixtures/` convention. Don't add them to git even incidentally
+(e.g. via a bare `git add -A`).
+
+Per standing policy, future commits/pushes still need the user's explicit
+ask each time — this one was requested directly.
 
 ## Backlog — next work (given by user 2026-07-27, not yet scoped/started)
 
