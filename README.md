@@ -6,7 +6,7 @@
 > Update this whenever a key setup fact, decision, or piece of completed work
 > changes — don't let it go stale.
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## What this is
 
@@ -132,12 +132,29 @@ Required/known-good for this project:
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | set (Supabase's newer `sb_publishable_...` key format — works fine as the anon key) |
 | `DATABASE_URL` | set — **must be the IPv4 pooler string**, see above |
 | `SUPABASE_SERVICE_ROLE_KEY` | **not set yet** — needed for admin-only server-side features when we build them |
-| `RESEND_API_KEY`, `EMAIL_FROM` | set |
+| `RESEND_API_KEY` | set, valid (confirmed via `GET /api-keys` → 200) — but see below |
+| `EMAIL_FROM` | `admissions@mail.greenhillinnovation.org` (changed 2026-08-25 from `admissions@greenhill.org` — see below) |
 | `APP_URL` | set to `http://localhost:3001` |
 
 If a future session can't find `.env.local` (e.g. fresh machine/clone), the
 values live only in the user's Supabase/Resend dashboards and this project's
 prior chat history — they are intentionally not duplicated anywhere in git.
+
+**Resend/email status (checked 2026-08-25, not yet resolved)**: the Resend
+API key works, but no email can actually send yet. `GET
+/domains` on the Resend account shows `mail.greenhillinnovation.org` with
+status `"failed"` — none of its 3 required DNS records verified (DKIM TXT at
+`resend._domainkey.mail.greenhillinnovation.org`, SPF MX + SPF TXT both at
+`send.mail.greenhillinnovation.org`, values available via the Resend API/
+dashboard). Domain was added 2026-08-06, so this isn't propagation lag —
+the records were likely never added, or added wrong. **`EMAIL_FROM` was
+changed today to match this domain** (`admissions@mail.greenhillinnovation.org`,
+was mismatched against `@greenhill.org` before, which wouldn't have worked
+either even with verification). User is checking the DNS side. Nothing to
+build here yet either way — per `SETUP.md`, actual email-sending code
+(magic-link SMTP relay, `.ics` invites via Resend) isn't wired up in the app
+yet, only the env vars exist. Don't assume this is fixed without re-checking
+`GET /domains` — verification could still be pending next session.
 
 ## Decisions made / features shipped this project so far
 
@@ -168,16 +185,19 @@ prior chat history — they are intentionally not duplicated anywhere in git.
      + `uploadProspectiveReport` action in `prospective-actions.ts`.
    - Parser: `src/lib/finalsite/parse-prospective-report.ts` (pure,
      column-name-based, not position-based).
-   - **Non-obvious finding, confirmed against `seed-interests.ts`**: the
-     four "Interest N" columns aren't 4 interests — they're two `(level,
-     name)` pairs (Interest 1/3 = proficiency word, Interest 2/4 = actual
-     interest name). User is aware and will double-check against a larger
-     real export.
-   - **This report has no gender column** (unlike the PDF form) — imported
-     rows get `gender: null`; admin must fill in on `/admin/prospectives`
-     before matching (gender is a hard filter). User said they'll get an
-     updated report that includes gender — once that lands, wire it into
-     this parser/action instead of leaving it null.
+   - **Both open questions below resolved 2026-08-26** — FinalSite updated
+     the report with explicit headers, so nothing here is inferred anymore:
+     the four generic "Interest N" columns are now named columns
+     `Involvement 1`/`Interest 1`/`Involvement 2`/`Interest 2` — confirming
+     the earlier (level, name)-pair theory exactly, and "Involvement" is
+     confirmed unused (proficiency level, per user: ignore it). A `Gender`
+     column (`M`/`F`) now exists too. Parser and `uploadProspectiveReport`
+     both updated to match: `gender` is read directly from the row now
+     (`gender: null` only when the cell itself is blank, flagged per-row in
+     the upload result as "N missing gender" rather than a blanket note).
+   - ~~Non-obvious finding: the four "Interest N" columns aren't 4
+     interests...~~ — superseded by the resolution above; kept here only so
+     the reasoning trail isn't lost. Original finding was confirmed correct.
    - Added `shadow_start`/`shadow_end` time columns to `prospective_students`
      (the report's "Date" column bundles a visit time-range, e.g. "7:45AM -
      1:00PM", which had nowhere to persist before). Applied via `db:push`,
@@ -300,22 +320,84 @@ prior chat history — they are intentionally not duplicated anywhere in git.
    - **If the user records a real screen-capture video later**, swap that
      href in `src/app/me/page.tsx` for the video URL instead — the artifact
      was explicitly a stand-in, not a rejection of the original "video" ask.
+8. **`EMAIL_FROM` fixed to match the intended sending domain** (2026-08-25).
+   Changed from the mismatched `admissions@greenhill.org` to
+   `admissions@mail.greenhillinnovation.org` in `.env.local` and on Vercel
+   production, then redeployed. Pure config change — no app code sends email
+   yet at this point in the timeline (see item 9, which changed that).
+   Confirmed via Supabase's Management API that magic-link sign-in still
+   runs on Supabase's own default mailer, not Resend (`smtp_host` etc. are
+   `null` in the project's auth config) — intentionally **not** switched to
+   Resend SMTP yet, since doing that before the domain verifies risks
+   breaking the only sign-in path the app has. Do that once `GET
+   https://api.resend.com/domains` shows the domain verified, not before.
+9. **Built "email schedule to host" via Resend** (2026-08-25) — the
+   `SETUP.md` "Pending" item ("only download is wired today") is now done in
+   code, blocked only on the same domain verification as item 8.
+   - `src/lib/email.ts` — thin `sendEmail()` wrapper around the `resend` SDK
+     (already a dependency, just unused until now). Reads
+     `process.env.RESEND_API_KEY`/`EMAIL_FROM` directly rather than through
+     `src/lib/env.ts`'s `env` object — that object's type is a client/server
+     discriminated union and doesn't expose server-only fields cleanly to
+     TypeScript outside `env.ts` itself; `src/lib/db/index.ts` uses the same
+     `process.env` workaround for the same reason.
+   - `src/lib/matching/build-match-ics.ts` — extracted the `.ics`-building
+     logic that used to live inline in the download route
+     (`admin/schedule/[matchId]/ics/route.ts`), so both the download and the
+     new email path produce identical calendar content from one place.
+   - `src/lib/matching/match-detail.ts` — `MatchDetail` now also resolves
+     `hostEmail` via `host_students.profile_id → profiles.email`. **Real
+     constraint**: `host_students` has no email column of its own — only
+     hosts who have logged in at least once (so `profile_id` is set) have a
+     resolvable email. Hosts synced in only via a calendar link or legacy
+     CSV import, who've never visited `/me`, have no email on file and are
+     skipped with an explicit message, not a silent failure.
+   - `src/lib/matching/email-host-schedule.ts` — `emailHostSchedule(matchId)`,
+     the shared send function: builds an HTML summary of the day
+     (reannouncing `buildTimeline`/`fmtTime`, same data source as the
+     printable page) plus the `.ics` as an attachment.
+   - Per-match **"Email to host"** button on `/admin/schedule/[matchId]`
+     (`email-actions.ts` + `email-button.tsx`, next to Download .ics/Print).
+   - Bulk **"Email schedules to hosts"** button on `/admin/match?date=X`
+     (`emailSchedulesForDate` in `actions.ts` + `email-schedules-button.tsx`)
+     — emails every confirmed/sent match's host for that date in one click,
+     reports `Sent N/M` plus which ones were skipped and why.
+   - **Verified end-to-end against real Resend calls**, not just typechecked:
+     built synthetic DB rows (prospective + match, reusing the real existing
+     admin host record from earlier `/me` testing — profiles/host_students
+     rows are unique-constrained per email/profile, so a from-scratch fake
+     profile collided), ran `emailHostSchedule` directly, confirmed the
+     no-email-on-file path, then confirmed the real failure mode is exactly
+     "The mail.greenhillinnovation.org domain is not verified" — i.e. the
+     *only* thing standing between this and working is item 8's DNS, not a
+     code bug. All synthetic rows cleaned up after; no real data left behind.
 
 ## Git status
 
-Base is **committed and pushed to `origin/main`** as of 2026-08-25, commit
-`143a566` ("Add view-as-student toggle, bulk prospective import, and synced
-host schedules"). On top of that, items 6-7 above (the `/admin/uploads`
-cleanup and the `/me` reorder + help guide) are done locally but **not yet
-committed/pushed** — remember: since `vercel link` connected this repo, the
-next push will also trigger a live production deploy automatically, so
-mention that before pushing again, not just before deploying.
+Base is **committed and pushed to `origin/main`** as of 2026-08-25 — two
+commits: `143a566` ("Add view-as-student toggle, bulk prospective import,
+and synced host schedules") and `478dda7` ("Simplify Uploads page and
+improve the student schedule-link flow", items 6-7 above). Every push since
+`vercel link` connected this repo auto-triggers a production deploy.
+Items 3 (gender/Involvement-Interest fix) and 9 (email-schedule-to-host)
+above are done locally but **not yet committed/pushed** — item 8
+(`EMAIL_FROM` fix) was a Vercel-only env change with nothing to commit.
 
 ```
- M src/app/admin/hosts/actions.ts
- M src/app/admin/hosts/page.tsx
+ M src/app/admin/match/actions.ts
+ M src/app/admin/match/page.tsx
+ M src/app/admin/schedule/[matchId]/ics/route.ts
+ M src/app/admin/schedule/[matchId]/page.tsx
  M src/app/admin/uploads/page.tsx
- M src/app/me/page.tsx
+ M src/app/admin/uploads/prospective-actions.ts
+ M src/lib/finalsite/parse-prospective-report.ts
+ M src/lib/matching/match-detail.ts
+?? src/app/admin/match/email-schedules-button.tsx
+?? src/app/admin/schedule/[matchId]/email-actions.ts
+?? src/app/admin/schedule/[matchId]/email-button.tsx
+?? src/lib/email.ts
+?? src/lib/matching/build-match-ics.ts
+?? src/lib/matching/email-host-schedule.ts
 ?? "Test Report-test.xlsx"        (real-looking student data — never commit)
 ?? "host ICS.ics"                 (real-looking student data — never commit)
 ?? "host schedule by block.xls"   (real-looking student data — never commit)
@@ -346,11 +428,11 @@ ask each time — this one was requested directly.
    Blackbaud schedule actually syncs into their Outlook calendar at all —
    won't know for certain until real hosts start saving links.
 3. New FinalSite report for prospective students — name, gender, grade,
-   interests, current school, visit date. **In progress** — see "Decisions
-   made" item 3 above. Import path is built and working against a sample
-   file; blocked on two things from the user: (a) an updated report that
-   actually includes gender, and (b) confirming the Interest-1-4
-   level/name-pairing interpretation against a bigger real export.
+   interests, current school, visit date. **Done 2026-08-26** — see
+   "Decisions made" item 3 above. Both blockers resolved: FinalSite's report
+   now has an explicit `Gender` column and named `Involvement`/`Interest`
+   columns (no more guessing). Import path verified against the updated
+   real sample file, all 10 rows parse clean with zero warnings.
 4. Output `.ics` files for **staff interviews** (distinct from the existing
    per-match `.ics` download at `/admin/schedule/[id]`).
 5. **Matching priority order**: Date → Grade → Gender → Interest 1 → next

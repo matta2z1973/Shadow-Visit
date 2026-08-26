@@ -1,24 +1,23 @@
 // Parses FinalSite's bulk prospective-student report (one row per
-// applicant, exported as .xlsx). Sample columns observed:
-//   First | middle_name | Last | name_suffix | Preferred | Grade | Date |
-//   Current School | Interest 1 | Interest 2 | Interest 3 | Interest 4
+// applicant, exported as .xlsx). Current columns (confirmed against a real
+// updated sample 2026-08-26 — this report previously had no Gender column
+// and generic "Interest 1-4" headers; FinalSite added explicit ones):
+//   First | middle_name | Last | name_suffix | Gender | Preferred | Grade |
+//   Date | Current School | Involvement 1 | Interest 1 | Involvement 2 |
+//   Interest 2
 //
-// The four "Interest N" columns are NOT four independent interests — they're
-// two (level, name) pairs: Interest 1/3 hold a proficiency word ("Advanced",
-// "Beginner", "Intermediate", "Haven't tried yet") and Interest 2/4 hold the
-// actual interest name ("Math Club", "Lacrosse (boys/girls)", ...). Confirmed
-// against src/lib/seed-interests.ts, which every "name" value matches exactly.
+// "Involvement N" holds a proficiency word ("Advanced", "Beginner", "Haven't
+// tried yet") — per the user, this is not used anywhere and is intentionally
+// ignored. Only "Interest N" (the actual interest name) is kept.
 //
-// Note: this report has no Gender column (unlike the PDF Interview & Visit
-// Form), and the Date column bundles a visit-time range that today's schema
-// has nowhere to store per-prospective (only a bare `shadow_date`) — both are
-// surfaced as warnings rather than silently dropped.
+// The Date column bundles a visit-time range that today's schema has nowhere
+// to store per-prospective... actually it does (shadow_start/shadow_end,
+// added 2026-08-25) — see prospective-actions.ts for where it's used.
 import { parseGrade, parseHumanDate } from "./parse-form-pdf";
 
 export type ParsedInterestPick = {
   name: string;
-  level: string | null;
-  priority: number; // 1 = highest (first pair encountered)
+  priority: number; // 1 = highest
 };
 
 export type ParsedProspectiveRow = {
@@ -28,6 +27,7 @@ export type ParsedProspectiveRow = {
   nameSuffix: string | null;
   preferredName: string | null;
   fullName: string | null;
+  gender: "M" | "F" | null;
   gradeRaw: string | null;
   grade: number | null;
   currentSchool: string | null;
@@ -53,14 +53,15 @@ const COLUMN_ALIASES: Record<string, string> = {
   last: "last",
   name_suffix: "suffix",
   suffix: "suffix",
+  gender: "gender",
   preferred: "preferred",
   grade: "grade",
   date: "date",
   "current school": "school",
   "interest 1": "interest1",
   "interest 2": "interest2",
-  "interest 3": "interest3",
-  "interest 4": "interest4",
+  // "Involvement 1"/"Involvement 2" (proficiency level) deliberately have no
+  // mapping — the user confirmed that data isn't used.
 };
 
 function normHeader(raw: Cell): string {
@@ -71,6 +72,14 @@ function cellStr(raw: Cell): string | null {
   if (raw === null || raw === undefined) return null;
   const s = String(raw).trim();
   return s || null;
+}
+
+function parseGender(raw: string | null): "M" | "F" | null {
+  if (!raw) return null;
+  const s = raw.trim().toUpperCase();
+  if (s === "M" || s.startsWith("MALE")) return "M";
+  if (s === "F" || s.startsWith("FEMALE")) return "F";
+  return null;
 }
 
 function buildColumnMap(headerRow: Cell[]): {
@@ -109,6 +118,7 @@ export function parseProspectiveReportRows(
     const middleName = cellStr(get(row, "middle"));
     const lastName = cellStr(get(row, "last"));
     const nameSuffix = cellStr(get(row, "suffix"));
+    const gender = parseGender(cellStr(get(row, "gender")));
     const preferredName = cellStr(get(row, "preferred"));
     const currentSchool = cellStr(get(row, "school"));
 
@@ -120,18 +130,9 @@ export function parseProspectiveReportRows(
       parseHumanDate(visitDateRaw);
 
     const interests: ParsedInterestPick[] = [];
-    const pairs: [string, string][] = [
-      ["interest1", "interest2"],
-      ["interest3", "interest4"],
-    ];
-    pairs.forEach(([levelKey, nameKey], i) => {
-      const level = cellStr(get(row, levelKey));
-      const name = cellStr(get(row, nameKey));
-      if (!name) {
-        if (level) warnings.push(`Interest level "${level}" has no paired interest name — skipped.`);
-        return;
-      }
-      interests.push({ name, level, priority: i + 1 });
+    (["interest1", "interest2"] as const).forEach((key, i) => {
+      const name = cellStr(get(row, key));
+      if (name) interests.push({ name, priority: i + 1 });
     });
 
     if (!firstName && !lastName) warnings.push("Could not read a first or last name.");
@@ -151,6 +152,7 @@ export function parseProspectiveReportRows(
       nameSuffix,
       preferredName,
       fullName,
+      gender,
       gradeRaw,
       grade,
       currentSchool,

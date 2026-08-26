@@ -7,6 +7,7 @@ import {
   hostScheduleBlocks,
   matchMeetings,
   staff,
+  profiles,
 } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
@@ -20,6 +21,9 @@ export type MatchDetail = {
   match: typeof matches.$inferSelect;
   prospective: typeof prospectiveStudents.$inferSelect;
   host: typeof hostStudents.$inferSelect | null;
+  // Only set if the host has ever logged in (host_students.profile_id) —
+  // hosts imported without ever visiting /me have no email on file.
+  hostEmail: string | null;
   counselorName: string | null;
   timeline: TimelineRow[];
 };
@@ -41,6 +45,16 @@ export async function getMatchDetail(matchId: string): Promise<MatchDetail | nul
         .from(hostStudents)
         .where(eq(hostStudents.id, match.hostStudentId))
         .limit(1))[0] ?? null
+    : null;
+
+  const hostEmail = host?.profileId
+    ? (
+        await db
+          .select({ email: profiles.email })
+          .from(profiles)
+          .where(eq(profiles.id, host.profileId))
+          .limit(1)
+      )[0]?.email ?? null
     : null;
 
   // Host's blocks for the shadow date — a plain DB read. This reflects
@@ -105,5 +119,5 @@ export async function getMatchDetail(matchId: string): Promise<MatchDetail | nul
     : null;
 
   const timeline = buildTimeline(hostBlocks, meetings);
-  return { match, prospective, host, counselorName, timeline };
+  return { match, prospective, host, hostEmail, counselorName, timeline };
 }

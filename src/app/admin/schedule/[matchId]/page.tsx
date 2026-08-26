@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth";
 import { getMatchDetail } from "@/lib/matching/match-detail";
 import { fmtTime } from "@/lib/schedule/day-timeline";
 import PrintButton from "@/components/print-button";
+import EmailScheduleButton from "./email-button";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +49,7 @@ export default async function SchedulePrint({
             {match.dayType ? ` · ${match.dayType} day` : ""}
           </p>
         </div>
-        <div className="flex gap-2 print:hidden">
+        <div className="flex items-start gap-2 print:hidden">
           <Link
             href={`/admin/schedule/${matchId}/ics`}
             className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
@@ -56,6 +57,7 @@ export default async function SchedulePrint({
             Download .ics
           </Link>
           <PrintButton />
+          <EmailScheduleButton matchId={matchId} />
         </div>
       </div>
 

@@ -12,7 +12,8 @@ import {
 import { getMatchDataForDate } from "@/lib/matching/loader";
 import { hostScheduleDays, hostScheduleBlocks } from "@/lib/db/schema";
 import { academicLettersFor } from "@/lib/schedule/us-blocks";
-import { and, eq } from "drizzle-orm";
+import { emailHostSchedule } from "@/lib/matching/email-host-schedule";
+import { and, eq, inArray } from "drizzle-orm";
 
 // Derive day-type + free-period count for a host on a date straight from the
 // stored schedule (keeps values correct even when admin overrides the host).
@@ -170,4 +171,40 @@ export async function bulkConfirmBest(formData: FormData) {
   }
   revalidatePath("/admin/match");
   revalidatePath("/admin/hosts");
+}
+
+export type EmailSchedulesResult = { ok: boolean; message: string };
+
+// Email every confirmed/sent match's host their schedule for the date.
+export async function emailSchedulesForDate(
+  _prev: EmailSchedulesResult | undefined,
+  formData: FormData,
+): Promise<EmailSchedulesResult> {
+  await requireAdmin();
+  const date = z.string().safeParse(formData.get("date"));
+  if (!date.success) return { ok: false, message: "Missing date." };
+
+  const dateMatches = await db
+    .select({ id: matches.id })
+    .from(matches)
+    .where(and(eq(matches.shadowDate, date.data), inArray(matches.status, ["confirmed", "sent"])));
+
+  if (!dateMatches.length) {
+    return { ok: false, message: "No confirmed matches on this date yet." };
+  }
+
+  let sent = 0;
+  const failures: string[] = [];
+  for (const m of dateMatches) {
+    const result = await emailHostSchedule(m.id);
+    if (result.ok) sent++;
+    else failures.push(result.message);
+  }
+
+  return {
+    ok: true,
+    message:
+      `Sent ${sent}/${dateMatches.length}.` +
+      (failures.length ? ` Skipped: ${failures.join("; ")}` : ""),
+  };
 }

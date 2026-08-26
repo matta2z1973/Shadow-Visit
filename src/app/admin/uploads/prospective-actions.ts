@@ -205,12 +205,14 @@ export async function uploadProspectiveReport(
       let imported = 0;
       let skipped = 0;
       let unmappedTotal = 0;
+      let missingGender = 0;
 
       for (const row of parsedRows) {
         if (!row.fullName) {
           skipped++;
           continue;
         }
+        if (!row.gender) missingGender++;
 
         const [prospective] = await db
           .insert(prospectiveStudents)
@@ -219,7 +221,7 @@ export async function uploadProspectiveReport(
             lastName: row.lastName,
             fullName: row.fullName,
             grade: row.grade,
-            gender: null, // this report has no gender column
+            gender: row.gender,
             currentSchool: row.currentSchool,
             shadowDate: row.visitDate,
             shadowStart: row.visitStart,
@@ -269,7 +271,7 @@ export async function uploadProspectiveReport(
         `${imported} imported`,
         skipped ? `${skipped} skipped (no name)` : null,
         unmappedTotal ? `⚠ ${unmappedTotal} unmapped interest(s)` : null,
-        imported ? `no gender data — fill in manually` : null,
+        missingGender ? `⚠ ${missingGender} missing gender — fill in manually` : null,
       ].filter(Boolean);
       perFile.push({ fileName: file.name, status: bits.join(" · ") });
     } catch (e) {

@@ -9,6 +9,7 @@ import {
   type MatchData,
 } from "@/lib/matching/loader";
 import { confirmMatch, bulkConfirmBest } from "./actions";
+import EmailSchedulesButton from "./email-schedules-button";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +118,7 @@ export default async function MatchPage({
               Confirm best for all
             </button>
           </form>
+          <EmailSchedulesButton date={date} />
         </div>
       </div>
 

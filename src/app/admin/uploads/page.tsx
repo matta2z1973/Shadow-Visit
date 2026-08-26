@@ -44,9 +44,10 @@ export default async function UploadsPage() {
         <h2 className="text-lg font-semibold">Prospective students (FinalSite)</h2>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           Upload a FinalSite bulk report (.xlsx) — one row per applicant, covering
-          many students at once. Reads name, grade, current school, visit date,
-          and up to two ranked interests. This report has no gender column, so
-          gender is left blank for admin fill-in; add it on the prospective's
+          many students at once. Reads name, gender, grade, current school, visit
+          date, and up to two ranked interests (the paired &ldquo;Involvement&rdquo;
+          columns are proficiency levels and aren&rsquo;t used). Any row missing
+          gender is flagged after upload — fill it in on the prospective&rsquo;s
           record before matching runs (gender is a hard filter).
         </p>
         <ProspectiveReportUploadForm />
