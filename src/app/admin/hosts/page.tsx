@@ -204,7 +204,7 @@ export default async function HostsPage() {
                     <input type="checkbox" name="active" defaultChecked={h.active} className="h-4 w-4" />
                     <span>Active</span>
                   </label>
-                  <button type="submit" className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+                  <button type="submit" className="rounded-md bg-forest px-3 py-1.5 text-sm font-medium text-white dark:bg-forest dark:text-white">
                     Save
                   </button>
                   <span className="pb-1.5 text-xs">

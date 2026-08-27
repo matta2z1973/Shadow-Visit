@@ -6,7 +6,7 @@
 > Update this whenever a key setup fact, decision, or piece of completed work
 > changes — don't let it go stale.
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## What this is
 
@@ -39,12 +39,13 @@ Built on the same stack as the school's coverage-planner app.
   new admin/student view toggle all confirmed working.
 - One real user account exists and is provisioned as admin:
   `abbondanziom@greenhill.org`.
-- All local work through 2026-08-25 is **committed and pushed** to
-  `origin/main` (commit `143a566`) — view-as-student toggle, bulk FinalSite
-  import, and the Outlook-synced host schedules. Working tree is clean
-  except the three untracked real-data sample files (see Secrets section).
-- **Deployed to production** (2026-08-25): https://shadow-visit-platform.vercel.app
-  — see the Deployment section below.
+- All local work through 2026-08-26 is **committed and pushed** to
+  `origin/main` (commit `8f00c7b`) — view-as-student toggle, bulk FinalSite
+  import (gender + interests now correct), Outlook-synced host schedules,
+  and email-schedule-to-host via Resend. Working tree is clean except the
+  three untracked real-data sample files (see Secrets section).
+- **Deployed to production**: https://shadow-visit-platform.vercel.app,
+  auto-redeployed on every push since — see the Deployment section below.
 
 ## Deployment
 
@@ -372,32 +373,295 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
      *only* thing standing between this and working is item 8's DNS, not a
      code bug. All synthetic rows cleaned up after; no real data left behind.
 
+10. **Counselor→interviewer rename, AI settings tab, embeddings-based interest
+    matching, interviewer fixed time-slots, host-schedule filters**
+    (2026-08-27) — three end-user feedback items, built together since they
+    touched overlapping schema. **Not yet committed to git or deployed** —
+    typecheck/lint pass and every touched page smoke-tested 200 via curl with
+    the admin bypass cookie, but the interactive forms (settings save,
+    availability add, filter UI) have not been driven from an actual browser
+    this session — no browser tool was available, so treat the click-through
+    as unverified until someone does that pass.
+    - **"Counselor" renamed to "interviewer" everywhere in the UI.** Pure
+      TS-level rename — SQL column names (`counselor_staff_id`,
+      `counselor_name_raw`) deliberately unchanged to avoid a migration;
+      only the Drizzle property names (`interviewerStaffId`,
+      `interviewerNameRaw`) and every UI label/form-field name changed.
+      Touched: `schema.ts`, `admin/match/{page,actions}.tsx`,
+      `admin/prospectives/{page,actions}.tsx`, `admin/match/export/route.ts`,
+      `admin/schedule/[matchId]/page.tsx`, `lib/matching/match-detail.ts`.
+    - **New `/admin/settings` ("AI Settings") page** — provider-agnostic LLM
+      config, stored as rows in the existing `app_settings` key/value table
+      (`src/lib/llm/settings.ts`): a reasoning-provider picker (Anthropic or
+      OpenAI — now consumed by the PDF course-catalog path below, with a
+      same-day fix so it actually respects this choice; see that section),
+      and a masked API-key field per provider (blank = keep existing key; a
+      checkbox explicitly clears one).
+      Saving a key round-trips it through a live test call
+      (`src/lib/llm/client.ts`) before persisting, so a typo is caught
+      immediately. **Anthropic has no public embeddings endpoint**, so
+      embeddings always go through OpenAI regardless of the chosen reasoning
+      provider — the page says this explicitly.
+    - **Course-catalog upload + embeddings**, same page, below the provider
+      form (`src/app/admin/settings/course-catalog-form.tsx` +
+      `uploadCourseCatalogAction`). Accepts **either a PDF or a spreadsheet**
+      — the real-world source turned out to be a PDF catalog with a lot of
+      non-course content mixed in (department overviews, graduation
+      requirements, front/back matter), not a clean spreadsheet as first
+      assumed, so PDF support was added 2026-08-27 as the primary path.
+      - **PDF path** (`src/lib/courses/extract-courses-from-pdf.ts`): sends
+        the raw PDF bytes to an LLM as a native document/file input (no
+        local text-extraction library) with structured outputs (a
+        hand-written JSON schema) forcing back exactly
+        `{courses: [{code, title, description}]}`. The prompt explicitly
+        tells it to skip anything that isn't one specific course and to
+        return every course found, not a sample. **Provider-agnostic, with a
+        fallback** — first version hardcoded this to Claude regardless of
+        the reasoning-provider setting, which was wrong (see "Fixed" note
+        below); now `resolveProvider()` uses whichever provider is selected
+        as the reasoning provider *if its key is saved*, otherwise falls
+        back to whichever key is actually present. Claude path: 24MB
+        source-file guard (base64 inflates ~4/3, API cap is 32MB),
+        `max_tokens: 64000`, streamed via
+        `client.messages.stream(...).finalMessage()`. OpenAI path: Responses
+        API (`client.responses.create`) with an `input_file` content part
+        (base64 data URL) + `text.format` structured output, model
+        `gpt-4o`, `max_output_tokens: 16384` — verified against the
+        installed `openai` v7.7.0 type definitions directly (no bundled
+        skill covers OpenAI's SDK the way one does for Anthropic's, so this
+        wasn't cross-checked against any external authority beyond the
+        installed package's own types).
+      - **Fixed same day**: initially required an Anthropic key
+        unconditionally for the PDF path even if only an OpenAI key was
+        configured — user caught this immediately ("should use one key,
+        whichever LLM is selected and has a key, not require one or more
+        specific keys"). Corrected as described above.
+      - **Spreadsheet path** (unchanged, kept as a fallback): .xlsx/.csv with
+        a course name/title column and (ideally) a description column
+        (`src/lib/courses/parse-course-catalog.ts` — flexible header
+        matching, several accepted spellings per column).
+      - Either path lands in the same place: **replaces the entire
+        catalog** — rows go into the `courses` table (`code`, `title`,
+        `description`, `embedding vector(1536)` via **pgvector**, enabled on
+        the Supabase Postgres instance via `scripts/enable-pgvector.ts`),
+        embedded via OpenAI `text-embedding-3-small` in batches of 100
+        (`src/lib/llm/embeddings.ts`).
+    - **Interest→class matching is now embeddings-based, with a keyword
+      fallback** — replaces the "Phase 2" placeholder that used to live in
+      `src/lib/matching/course-map.ts`. `courseCoveredInterestIds` now takes
+      an optional `SemanticMatchContext` (catalog rows + one embedding per
+      interest, cosine similarity ≥ 0.32 = "covered") and unions its result
+      with the existing keyword matcher — keyword matching alone if no
+      catalog is uploaded or no OpenAI key is set, so nothing breaks for a
+      school that never visits the new settings page.
+      `src/lib/matching/loader.ts`'s new `buildSemanticContext()` builds
+      this once per match-run: reads the `courses` table, and **lazily
+      embeds+caches each interest's embedding on the `interests` row itself**
+      (new `interests.embedding` column) so repeat page loads of
+      `/admin/match` don't re-call the embeddings API for interests already
+      embedded. A host's scheduled course is resolved to a catalog row by
+      exact course-code match, then exact normalized-title match, then a
+      loose substring match either direction (ICS-sourced course
+      titles/codes are often abbreviated). `engine.ts`'s existing
+      "interest covered by an actual class the student sees" bonus was
+      bumped from +1 to +2 to reflect the user's explicit priority that a
+      class-based interest match should outweigh a merely-shared-hobby
+      match more clearly. Grade and gender remain hard constraints exactly
+      as before (unchanged) — that already satisfies "match on Gender, Grade,
+      Interests" as listed priorities; nothing structural needed there.
+    - **Interviewer fixed time-slot scheduling** (`/admin/staff`, Admissions
+      tab, below each staffer's calendar-link field) — new
+      `interviewer_availability` table (staff id, date range, weekday
+      multi-select Mon–Fri, 30-min block multi-select 8am–3pm, all as
+      Postgres array columns) via `addInterviewerAvailability`/
+      `deleteInterviewerAvailability` in `admin/staff/actions.ts`.
+      `src/lib/matching/interview-slots.ts`'s `getOpenInterviewSlots(date)`
+      turns these templates into actually-open slots for a given shadow
+      date (matches the ISO weekday, excludes slots already booked by
+      another prospective's confirmed `match_meetings` row that day). Wired
+      into `/admin/match`: the old free-standing "Interviewer" `<select>`
+      is now a single grouped "Interview slot" dropdown (one `<optgroup>`
+      per interviewer, one `<option>` per open 30-min block); confirming a
+      match writes the picked interviewer + computed start/end straight onto
+      `prospective_students` and the `match_meetings` row — replacing
+      reliance on the family's free-form PDF-selected time. **Known gap**:
+      nothing yet auto-*assigns* a slot during bulk "Confirm best for all" —
+      that button still leaves the interview slot unset, admin has to pick
+      one per-row afterward. Also, no `.ics` output for staff interviews yet
+      (separate, still-open backlog item 4 below).
+    - **Host-schedule grade/gender/interest filters**
+      (`/admin/hosts/schedules` → `schedule-compare.tsx`): grade `<select>`
+      (5–12), gender `<select>`, and an interest multi-select
+      (`<details>`-based checkbox popover, any-of semantics). Per explicit
+      spec: **setting any filter resets the host-selection checkboxes to
+      empty** (same effect as clicking "Clear all"), the visible checkbox
+      grid narrows to just the filtered hosts once any filter is active, and
+      "Select all" thereafter only selects that filtered/visible set;
+      "Clear all" is unchanged (always empties selection regardless of
+      filters). The comparison table itself is unaffected structurally —
+      still just "whatever's checked," exactly as before.
+    - New dependencies: `@anthropic-ai/sdk`, `openai`. New schema: `courses`
+      table, `interviewer_availability` table, `interests.embedding` column
+      — all applied via `db:push --force` per the standing migration-journal
+      quirk above, not a tracked migration.
+    - **No `ANTHROPIC_API_KEY`/OpenAI key exists anywhere in this
+      environment yet** (checked bash + PowerShell env, no `ant` CLI either)
+      — an admin needs to visit `/admin/settings` and add at least an OpenAI
+      key before semantic interest matching activates; until then matching
+      silently runs keyword-only, which is the pre-existing behavior, so
+      nothing regresses by leaving it unconfigured. User has since added an
+      OpenAI key via the settings page (confirmed by hitting the PDF-upload
+      bug below), but has not confirmed adding an Anthropic key.
+    - **`next.config.ts` needed a body-size-limit bump for the PDF upload**:
+      Next's Server Actions default to a 1MB request body cap, hit
+      immediately on any real course-catalog PDF. Added
+      `experimental.serverActions.bodySizeLimit: "30mb"` (still under
+      `experimental` in Next 16.2.4 per its own type defs) — comfortably
+      above `extractCoursesFromPdf`'s own 24MB guard. **Requires restarting
+      the dev server** to take effect; Turbopack does auto-detect and
+      restart on `next.config.ts` changes on its own (`⚠ Found a change in
+      next.config.ts. Restarting the server to apply the changes...` seen in
+      the logs), but don't rely on that timing — if a body-size error
+      persists right after this kind of config change, restart manually
+      before assuming the fix didn't work.
+11. **Admin nav restructured into sub-tab groups** (2026-08-27, same day),
+    per explicit request. Top nav is now just **Dashboard, Match,
+    Prospectives, Hosts, Settings** — mirroring the existing Hosts pattern
+    (top-level link → the group's first page, a small tab-bar component
+    rendered inside each page).
+    - **Availability removed from the nav** (not deleted) — `/admin/availability`
+      still exists and works exactly as before, just unreachable by clicking
+      anything; only reachable by typing the URL directly. No code under
+      `src/app/admin/availability/` was touched.
+    - **Uploads folded into Prospectives** as two tabs: "Students" (the
+      existing `/admin/prospectives` page, unchanged content) and "Upload"
+      (new `/admin/prospectives/upload/page.tsx`). The old top-level
+      `/admin/uploads` route is **deleted** (`page.tsx` removed — now 404s);
+      its action/form modules (`actions.ts`, `prospective-actions.ts`,
+      `host-upload-form.tsx`, `prospective-upload-form.tsx`,
+      `prospective-report-upload-form.tsx`) were left in place under
+      `src/app/admin/uploads/` and are imported cross-folder into the new
+      page rather than physically moved, to keep the diff small. Per
+      explicit request, the migrated Upload tab **dropped the "Host
+      schedules" pointer paragraph** (made sense on a catch-all Uploads
+      page, redundant once nested under Prospectives) and also dropped a
+      stale "Course catalog — Phase 2 placeholder" card that had been sitting
+      there since before this session — real course-catalog upload lives on
+      Settings → AI Settings now, so that placeholder was actively
+      misleading. New component: `src/components/prospectives-tabs.tsx`
+      (`"students" | "upload"`). Fixed every other in-app link that pointed
+      at `/admin/uploads` (`admin/page.tsx`'s "Upload data" button,
+      `admin/match/page.tsx`'s empty-state copy — which was also still
+      stale-referencing the long-removed PDF-form upload path, now says
+      "FinalSite bulk report" correctly) and the `revalidatePath("/admin/uploads")`
+      calls in `prospective-actions.ts` (now revalidate
+      `/admin/prospectives/upload` + `/admin/prospectives`).
+    - **Interests, Staff, and AI Settings folded into "Settings"** as three
+      tabs on a new `src/components/settings-tabs.tsx`
+      (`"interests" | "staff" | "ai"`), rendered on each of the three
+      existing pages (`/admin/interests`, `/admin/staff`, `/admin/settings`)
+      right below each page's own `<h1>` — same placement convention as
+      `HostsTabs`/`ProspectivesTabs`. Routes themselves are unchanged; the
+      top nav's "Settings" link points at `/admin/interests` (the first tab),
+      mirroring how "Hosts" points at the roster page. The Staff page's
+      existing Faculty/Admissions sub-tabs (a *second*, page-internal tab
+      row) sit directly below `SettingsTabs`, unchanged.
+    - Verified via curl smoke tests (200 on every new/moved route, 404 on
+      the deleted `/admin/uploads`) rather than a real browser click-through
+      — same caveat as item 10, no browser tool available this session.
+12. **Nav reorder + real Greenhill branding** (2026-08-27, same day). Three
+    small requests handled together since the last two touch the same files.
+    - **Top nav reordered** to Dashboard → Prospectives → Hosts → Match →
+      Settings (was Dashboard → Match → Prospectives → Hosts → Settings).
+    - **Logo swapped**: the placeholder "SV" badge in `site-nav.tsx` is now
+      the real Greenhill "G" mark. Source file
+      `Graphics/G_green.svg` (sibling folder to this repo, one level up —
+      not part of the repo) copied to `public/greenhill-g.svg` and rendered
+      as a plain `<img>` (no `next/image`; it's a small static brand mark,
+      not worth the optimization pipeline).
+    - **Real brand palette + typography applied**, sourced from
+      `Graphics/Greenhill Style Guide (Updated August 2024).pdf`
+      (confirmed exact hex/typeface names — the user's first copy of this
+      file was accidentally just a single page from the deck with no hex
+      codes; they replaced it with the real 20+ page guide mid-conversation).
+      - **Colors** (`src/app/globals.css`, Tailwind v4 `@theme` block — no
+        `tailwind.config.ts` in this project, CSS-first config): Forest
+        Green `#004820` (primary), Cool Green `#00ae77`, Light Green
+        `#11de92`, Copper `#c87337` from the primary palette; Forest Dark
+        `#092b1c`, Mint `#94ffd6`, Ivory `#f1efe4` from the secondary
+        palette — all exposed as Tailwind utilities (`bg-forest`,
+        `text-cool-green`, etc.) via `--color-*` custom properties, the v4
+        convention. Every primary-action element site-wide (buttons, active
+        tab/date pills, the "admin" badge) was swapped from the placeholder
+        `zinc-900`/`green-800` scheme to `bg-forest` via a scripted find/replace
+        across `src/` (86 replacements, 20 files) — **not hand-edited
+        file-by-file**. The script's negative-lookbehind regex initially
+        mis-caught two `dark:hover:bg-zinc-900` subtle-hover states (unrelated
+        to the brand-primary pattern) as `dark:hover:bg-forest`; caught by
+        grepping every resulting `bg-forest` occurrence afterward and
+        reverted those two by hand (`site-nav.tsx`, `me/page.tsx`). Status
+        chips (day-type green/gold, match-confirmed green, warning amber,
+        error red) were deliberately left untouched — those are semantic
+        state colors, unrelated to brand green, and touching them would
+        break their meaning.
+      - **Typography**: the style guide's actual website fonts are Plantin
+        (headlines) and Halyard (body) — both **Adobe-licensed webfonts**
+        this project has no Adobe Fonts kit for, so they aren't embeddable
+        here. Substituted the closest open equivalents in the same register
+        via `next/font/google`: **Source Serif 4** (transitional serif,
+        `--font-heading`, applied globally to `h1`/`h2`/`h3` via a bare CSS
+        rule in `globals.css` rather than touching every page) and
+        **Work Sans** (humanist grotesque, `--font-body`, wired as the new
+        `--font-sans` so it's the default body font everywhere). Dropped the
+        default `Geist` sans font entirely; kept `Geist_Mono` (still used
+        for a few `font-mono` spots like file-upload result rows). **Also
+        fixed a latent bug while in here**: `globals.css`'s `body` rule had
+        a hardcoded `font-family: Arial, Helvetica, sans-serif` that
+        silently overrode the `--font-sans` Tailwind variable — the site was
+        actually rendering in plain Arial the whole time, not the Geist font
+        the original scaffold intended. Now correctly references
+        `var(--font-sans)` first.
+    - Verified: `npm run typecheck` and `eslint src/` both pass clean; every
+      admin page + `/me` + `/login` smoke-tested 200 after a full dev-server
+      restart (cleared an accumulated Supabase connection-pool exhaustion
+      from earlier smoke testing — see the local-setup memory note on this).
+      **Not verified in an actual browser** — no browser tool available this
+      session, so the visual result (does Source Serif 4 actually look good
+      against Work Sans, does forest green read correctly in dark mode) is
+      unconfirmed. Look at it before deploying.
+13. **Forced light theme** (2026-08-27, same day) — the site was rendering
+    dark for the user, since every component has `dark:` Tailwind variants
+    that, by Tailwind v4's default, follow the browser/OS
+    `prefers-color-scheme`. Rather than stripping `dark:` classes out of
+    ~30 files, switched the variant itself to class-based via
+    `@custom-variant dark (&:where(.dark, .dark *));` in `globals.css` —
+    since nothing in the app ever adds a `.dark` class anywhere, every
+    `dark:` utility is now permanently inert and the site renders light
+    unconditionally, regardless of visitor system setting. Also deleted the
+    plain-CSS `@media (prefers-color-scheme: dark) { :root { ... } }` block
+    that separately overrode `--background`/`--foreground` outside Tailwind's
+    utility system — needed removing too, or the page background/text color
+    would still have flipped dark even with `dark:` utilities neutralized.
+    Confirmed via the compiled CSS bundle: zero `prefers-color-scheme`
+    occurrences, dark selectors now compile to `:where(.dark, .dark *)`.
+    If dark mode is ever wanted back as a real feature (not just removed),
+    the natural next step is a theme-toggle button that adds/removes `.dark`
+    on `<html>` — the class-based variant is already set up for that, just
+    unused.
+
 ## Git status
 
-Base is **committed and pushed to `origin/main`** as of 2026-08-25 — two
+**Fully committed and pushed to `origin/main`** as of 2026-08-26 — three
 commits: `143a566` ("Add view-as-student toggle, bulk prospective import,
-and synced host schedules") and `478dda7` ("Simplify Uploads page and
-improve the student schedule-link flow", items 6-7 above). Every push since
-`vercel link` connected this repo auto-triggers a production deploy.
-Items 3 (gender/Involvement-Interest fix) and 9 (email-schedule-to-host)
-above are done locally but **not yet committed/pushed** — item 8
-(`EMAIL_FROM` fix) was a Vercel-only env change with nothing to commit.
+and synced host schedules"), `478dda7` ("Simplify Uploads page and improve
+the student schedule-link flow", items 6-7), and `8f00c7b` ("Add
+email-schedule-to-host via Resend; fix bulk import gender/interests",
+items 3 and 9). Every push since `vercel link` connected this repo
+auto-triggers a production deploy — confirmed again for `8f00c7b` (new
+deployment, "Ready", 36s build). Item 8 (`EMAIL_FROM` fix) was a
+Vercel-only env change with nothing to commit. Working tree is clean except:
 
 ```
- M src/app/admin/match/actions.ts
- M src/app/admin/match/page.tsx
- M src/app/admin/schedule/[matchId]/ics/route.ts
- M src/app/admin/schedule/[matchId]/page.tsx
- M src/app/admin/uploads/page.tsx
- M src/app/admin/uploads/prospective-actions.ts
- M src/lib/finalsite/parse-prospective-report.ts
- M src/lib/matching/match-detail.ts
-?? src/app/admin/match/email-schedules-button.tsx
-?? src/app/admin/schedule/[matchId]/email-actions.ts
-?? src/app/admin/schedule/[matchId]/email-button.tsx
-?? src/lib/email.ts
-?? src/lib/matching/build-match-ics.ts
-?? src/lib/matching/email-host-schedule.ts
 ?? "Test Report-test.xlsx"        (real-looking student data — never commit)
 ?? "host ICS.ics"                 (real-looking student data — never commit)
 ?? "host schedule by block.xls"   (real-looking student data — never commit)
@@ -434,13 +698,20 @@ ask each time — this one was requested directly.
    columns (no more guessing). Import path verified against the updated
    real sample file, all 10 rows parse clean with zero warnings.
 4. Output `.ics` files for **staff interviews** (distinct from the existing
-   per-match `.ics` download at `/admin/schedule/[id]`).
+   per-match `.ics` download at `/admin/schedule/[id]`). Still open — the
+   interviewer fixed-slot feature (item 10 above, 2026-08-27) picks a slot
+   and writes it to `match_meetings`, but nothing generates an `.ics` for
+   the interviewer from it yet.
 5. **Matching priority order**: Date → Grade → Gender → Interest 1 → next
    interests in descending priority → Previous school (lowest priority).
-   Should inform/replace the matching engine's current logic in
-   `src/lib/matching/` (today: hard grade/gender filters + interest-fit +
-   free-period rule + soft-cap load balancing, no explicit tie-break ladder
-   like this).
+   **Partially superseded 2026-08-27** by a more specific, later request
+   (Gender → Grade → Interests → class-based interest match) — grade/gender
+   remain hard constraints as before, interest coverage now prefers a class
+   match more strongly (+2 bonus, was +1), and interest matching itself is
+   now embeddings-based with keyword fallback (see item 10 above). "Previous
+   school (lowest priority)" as an actual scoring factor is still
+   unimplemented — `previousSchool`/`currentSchool` data exists on
+   prospectives but doesn't feed into `engine.ts` at all yet.
 6. Add a "previous school" field on the **host** side (currently only
    planned for prospective-student data via item 3).
 7. Run **Middle School and Upper School as separate operations** — not
@@ -460,8 +731,10 @@ detail.
 
 ## Also pending (from original SETUP.md, still relevant)
 
-- Course-catalog vector store + LLM interest→course fit (Phase 2; currently
-  a keyword mapper in `src/lib/matching/course-map.ts`, swap point isolated).
+- ~~Course-catalog vector store + LLM interest→course fit (Phase 2)~~ —
+  **done 2026-08-27**, see "Decisions made" item 10 above. Requires an admin
+  to upload a catalog and set an OpenAI key on `/admin/settings` before it
+  activates; keyword matching still runs either way.
 - Emailing the `.ics`/schedule via Resend (only download is wired today).
 - Confirming the exact shadow-date PDF field label.
 - Published Outlook free/busy feeds, Blackbaud SKY API, MS Graph.

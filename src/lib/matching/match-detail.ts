@@ -24,7 +24,7 @@ export type MatchDetail = {
   // Only set if the host has ever logged in (host_students.profile_id) —
   // hosts imported without ever visiting /me have no email on file.
   hostEmail: string | null;
-  counselorName: string | null;
+  interviewerName: string | null;
   timeline: TimelineRow[];
 };
 
@@ -114,10 +114,10 @@ export async function getMatchDetail(matchId: string): Promise<MatchDetail | nul
     endTime: m.endTime,
   }));
 
-  const counselorName = prospective.counselorStaffId
-    ? staffName.get(prospective.counselorStaffId) ?? null
+  const interviewerName = prospective.interviewerStaffId
+    ? staffName.get(prospective.interviewerStaffId) ?? null
     : null;
 
   const timeline = buildTimeline(hostBlocks, meetings);
-  return { match, prospective, host, hostEmail, counselorName, timeline };
+  return { match, prospective, host, hostEmail, interviewerName, timeline };
 }

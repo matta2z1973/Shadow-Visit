@@ -49,7 +49,9 @@ async function deriveHostDay(
 }
 
 // Create/replace the confirmed match for one prospective, and place the
-// family-selected interview on the day (assigned to the chosen counselor).
+// interview on the day at the chosen interviewer's fixed slot (see
+// src/lib/matching/interview-slots.ts — replaces the old family-selected
+// free-form time).
 async function writeMatch(args: {
   prospectiveId: string;
   hostStudentId: string | null;
@@ -57,7 +59,7 @@ async function writeMatch(args: {
   dayType: "green" | "gold" | null;
   freePeriodCount: number | null;
   score: number | null;
-  counselorStaffId: string | null;
+  interviewSlot: { staffId: string; start: string; end: string } | null;
   createdBy: string;
 }) {
   await db.delete(matches).where(eq(matches.prospectiveId, args.prospectiveId));
@@ -76,14 +78,18 @@ async function writeMatch(args: {
     })
     .returning({ id: matches.id });
 
-  if (args.counselorStaffId) {
+  if (args.interviewSlot) {
     await db
       .update(prospectiveStudents)
-      .set({ counselorStaffId: args.counselorStaffId })
+      .set({
+        interviewerStaffId: args.interviewSlot.staffId,
+        interviewDate: args.shadowDate,
+        interviewStart: `${args.interviewSlot.start}:00`,
+        interviewEnd: `${args.interviewSlot.end}:00`,
+      })
       .where(eq(prospectiveStudents.id, args.prospectiveId));
   }
 
-  // Admissions interview from the form-selected slot.
   const [p] = await db
     .select()
     .from(prospectiveStudents)
@@ -93,7 +99,7 @@ async function writeMatch(args: {
     await db.insert(matchMeetings).values({
       matchId: m.id,
       kind: "admissions_interview",
-      staffId: args.counselorStaffId,
+      staffId: p.interviewerStaffId,
       startTime: p.interviewStart,
       endTime: p.interviewEnd,
       notes: `Interview on ${p.interviewDate}`,
@@ -109,8 +115,23 @@ const confirmSchema = z.object({
   dayType: z.enum(["green", "gold"]).optional().or(z.literal("")),
   freePeriodCount: z.coerce.number().int().optional(),
   score: z.coerce.number().int().optional(),
-  counselorStaffId: z.string().uuid().optional().or(z.literal("")),
+  // "<staffId>::<HH:MM>", from the fixed-slot dropdown on /admin/match.
+  interviewSlot: z.string().optional().or(z.literal("")),
 });
+
+function parseInterviewSlot(
+  raw: string | undefined,
+): { staffId: string; start: string; end: string } | null {
+  if (!raw) return null;
+  const [staffId, start] = raw.split("::");
+  if (!staffId || !start) return null;
+  const [h, m] = start.split(":").map(Number);
+  const total = h * 60 + m + 30;
+  const end = `${Math.floor(total / 60).toString().padStart(2, "0")}:${(total % 60)
+    .toString()
+    .padStart(2, "0")}`;
+  return { staffId, start, end };
+}
 
 export async function confirmMatch(formData: FormData) {
   const admin = await requireAdmin();
@@ -121,7 +142,7 @@ export async function confirmMatch(formData: FormData) {
     dayType: formData.get("dayType") || "",
     freePeriodCount: formData.get("freePeriodCount") || undefined,
     score: formData.get("score") || undefined,
-    counselorStaffId: formData.get("counselorStaffId") || "",
+    interviewSlot: formData.get("interviewSlot") || "",
   });
   if (!parsed.success) return;
 
@@ -137,7 +158,7 @@ export async function confirmMatch(formData: FormData) {
     dayType: derived.dayType,
     freePeriodCount: derived.freePeriodCount,
     score: parsed.data.score ?? null,
-    counselorStaffId: parsed.data.counselorStaffId || null,
+    interviewSlot: parseInterviewSlot(parsed.data.interviewSlot),
     createdBy: admin.id,
   });
 
@@ -165,7 +186,7 @@ export async function bulkConfirmBest(formData: FormData) {
           | null) ?? null,
       freePeriodCount: r.best.freePeriodCount,
       score: r.best.score,
-      counselorStaffId: null,
+      interviewSlot: null,
       createdBy: admin.id,
     });
   }

@@ -7,6 +7,7 @@ import {
   staff,
 } from "@/lib/db/schema";
 import { asc, eq, inArray } from "drizzle-orm";
+import ProspectivesTabs from "@/components/prospectives-tabs";
 import { updateProspective, deleteProspective } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -46,9 +47,12 @@ export default async function ProspectivesPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Prospective students</h1>
         <span className="text-sm text-zinc-500">{rows.length} total</span>
       </div>
-      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+
+      <ProspectivesTabs active="students" />
+
+      <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         Imported from FinalSite forms. All fields are editable; interests come from
-        the form. Assign the admissions counselor here or during matching.
+        the form. Assign the admissions interviewer here or during matching.
       </p>
 
       <div className="mt-6 space-y-3">
@@ -110,8 +114,8 @@ export default async function ProspectivesPage() {
                   <input name="familyEmail" type="email" defaultValue={p.familyEmail ?? ""} className={`${field} w-48`} />
                 </label>
                 <label className="flex flex-col gap-1 text-xs">
-                  <span className="text-zinc-500">Counselor</span>
-                  <select name="counselorStaffId" defaultValue={p.counselorStaffId ?? ""} className={field}>
+                  <span className="text-zinc-500">Interviewer</span>
+                  <select name="interviewerStaffId" defaultValue={p.interviewerStaffId ?? ""} className={field}>
                     <option value="">—</option>
                     {admissions.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -120,7 +124,7 @@ export default async function ProspectivesPage() {
                     ))}
                   </select>
                 </label>
-                <button type="submit" className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+                <button type="submit" className="rounded-md bg-forest px-3 py-1.5 text-sm font-medium text-white dark:bg-forest dark:text-white">
                   Save
                 </button>
               </form>

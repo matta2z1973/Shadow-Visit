@@ -4,6 +4,8 @@ import {
   hostStudents,
   hostScheduleDays,
   hostScheduleBlocks,
+  hostStudentInterests,
+  interests,
 } from "@/lib/db/schema";
 import { asc, eq, inArray } from "drizzle-orm";
 import HostsTabs from "@/components/hosts-tabs";
@@ -33,6 +35,27 @@ export default async function SchedulesPage({
     .from(hostStudents)
     .where(eq(hostStudents.active, true))
     .orderBy(asc(hostStudents.fullName));
+  const hostIds = hostRows.map((h) => h.id);
+
+  const [hostInterestRows, interestRows] = await Promise.all([
+    hostIds.length
+      ? db
+          .select()
+          .from(hostStudentInterests)
+          .where(inArray(hostStudentInterests.hostStudentId, hostIds))
+      : Promise.resolve([]),
+    db
+      .select()
+      .from(interests)
+      .where(eq(interests.active, true))
+      .orderBy(asc(interests.category), asc(interests.name)),
+  ]);
+  const interestIdsByHost = new Map<string, string[]>();
+  for (const hi of hostInterestRows) {
+    const list = interestIdsByHost.get(hi.hostStudentId) ?? [];
+    list.push(hi.interestId);
+    interestIdsByHost.set(hi.hostStudentId, list);
+  }
 
   const days = await db
     .select()
@@ -68,8 +91,10 @@ export default async function SchedulesPage({
       gender: h.gender,
       dayType: (day?.dayType as "green" | "gold" | null) ?? null,
       byLetter,
+      interestIds: interestIdsByHost.get(h.id) ?? [],
     };
   });
+  const interestOptions = interestRows.map((i) => ({ id: i.id, name: i.name }));
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-10">
@@ -115,7 +140,7 @@ export default async function SchedulesPage({
         </p>
       ) : null}
 
-      <ScheduleCompare date={date} hosts={hostsData} />
+      <ScheduleCompare date={date} hosts={hostsData} interestOptions={interestOptions} />
     </main>
   );
 }

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { interests } from "@/lib/db/schema";
 import { asc } from "drizzle-orm";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
+import SettingsTabs from "@/components/settings-tabs";
 import {
   addInterest,
   renameInterest,
@@ -85,7 +86,7 @@ function Section({ slug, label, items }: { slug: string; label: string; items: R
           placeholder={`Add ${label} interest…`}
           className="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         />
-        <button type="submit" className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+        <button type="submit" className="rounded-md bg-forest px-3 py-2 text-sm font-medium text-white dark:bg-forest dark:text-white">
           Add
         </button>
       </form>
@@ -103,7 +104,10 @@ export default async function InterestsAdmin() {
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Interests</h1>
-      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+
+      <SettingsTabs active="interests" />
+
+      <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         Organized into four categories. Use &ldquo;move&rdquo; to recategorize an
         interest. Disabled interests stay on past records but can&rsquo;t be newly
         selected.

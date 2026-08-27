@@ -43,7 +43,7 @@ export async function GET(req: Request) {
     "Shadow Date",
     "Day Type",
     "Host Student",
-    "Admissions Counselor",
+    "Admissions Interviewer",
     "Interview Date",
     "Interview Time",
     "Free Periods",
@@ -53,7 +53,7 @@ export async function GET(req: Request) {
   for (const m of rows) {
     const p = pMap.get(m.prospectiveId);
     const h = m.hostStudentId ? hMap.get(m.hostStudentId) : null;
-    const counselor = p?.counselorStaffId ? sMap.get(p.counselorStaffId) : "";
+    const interviewer = p?.interviewerStaffId ? sMap.get(p.interviewerStaffId) : "";
     const interviewTime =
       p?.interviewStart && p?.interviewEnd
         ? `${p.interviewStart.slice(0, 5)}-${p.interviewEnd.slice(0, 5)}`
@@ -66,7 +66,7 @@ export async function GET(req: Request) {
         m.shadowDate,
         m.dayType ?? "",
         h?.fullName ?? "",
-        counselor ?? "",
+        interviewer ?? "",
         p?.interviewDate ?? "",
         interviewTime,
         m.freePeriodCount ?? "",

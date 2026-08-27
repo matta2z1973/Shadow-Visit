@@ -144,7 +144,8 @@ export async function uploadProspectiveForms(
     }
   }
 
-  revalidatePath("/admin/uploads");
+  revalidatePath("/admin/prospectives/upload");
+  revalidatePath("/admin/prospectives");
   revalidatePath("/admin");
   revalidatePath("/admin/match");
   return { ok: true, message: `Processed ${files.length} file(s).`, perFile };
@@ -282,7 +283,8 @@ export async function uploadProspectiveReport(
     }
   }
 
-  revalidatePath("/admin/uploads");
+  revalidatePath("/admin/prospectives/upload");
+  revalidatePath("/admin/prospectives");
   revalidatePath("/admin");
   revalidatePath("/admin/match");
   return {

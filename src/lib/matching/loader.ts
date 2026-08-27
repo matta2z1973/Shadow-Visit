@@ -7,6 +7,7 @@ import {
   prospectiveStudents,
   prospectiveInterests,
   interests,
+  courses,
   matches,
   appSettings,
 } from "@/lib/db/schema";
@@ -17,8 +18,61 @@ import {
   type ProspectiveForMatch,
   type RankedMatch,
 } from "./engine";
-import { courseCoveredInterestIds, type InterestRef } from "./course-map";
+import {
+  courseCoveredInterestIds,
+  type InterestRef,
+  type CourseCatalogEntry,
+  type SemanticMatchContext,
+} from "./course-map";
+import { embedTexts, EmbeddingsNotConfiguredError } from "@/lib/llm/embeddings";
 import { syncSchedulesForDate } from "@/lib/schedule/ics-sync";
+
+// Builds the embeddings-based matching context: the course catalog (if any
+// has been uploaded on /admin/settings) plus an embedding per interest,
+// computed once and cached on the interests row so repeat match runs don't
+// re-call the embeddings API. Returns undefined (pure keyword fallback) if
+// no catalog is loaded or no OpenAI key is configured.
+async function buildSemanticContext(
+  interestRows: (typeof interests.$inferSelect)[],
+): Promise<SemanticMatchContext | undefined> {
+  const catalogRows = await db.select().from(courses);
+  if (catalogRows.length === 0) return undefined;
+
+  const catalog: CourseCatalogEntry[] = catalogRows.map((c) => ({
+    code: c.code,
+    title: c.title,
+    embedding: (c.embedding as number[] | null) ?? null,
+  }));
+
+  const interestEmbeddings = new Map<string, number[]>();
+  for (const i of interestRows) {
+    if (i.embedding) interestEmbeddings.set(i.id, i.embedding as number[]);
+  }
+
+  const missing = interestRows.filter((i) => !i.embedding);
+  if (missing.length) {
+    try {
+      const embedded = await embedTexts(missing.map((i) => i.name));
+      for (let idx = 0; idx < missing.length; idx++) {
+        const embedding = embedded[idx];
+        interestEmbeddings.set(missing[idx].id, embedding);
+        await db
+          .update(interests)
+          .set({ embedding })
+          .where(eq(interests.id, missing[idx].id));
+      }
+    } catch (err) {
+      if (!(err instanceof EmbeddingsNotConfiguredError)) {
+        console.error("Failed to embed interests for semantic matching:", err);
+      }
+      // Fall back to whatever embeddings were already cached — matching
+      // degrades to keyword-only for any interest still missing one.
+    }
+  }
+
+  if (interestEmbeddings.size === 0) return undefined;
+  return { catalog, interestEmbeddings };
+}
 
 export async function getSoftCap(): Promise<number> {
   const [row] = await db
@@ -53,6 +107,9 @@ export type ProspectiveRow = {
   grade: number | null;
   gender: "M" | "F" | null;
   interests: { interestId: string; name: string; priority: number }[];
+  interviewerStaffId: string | null;
+  interviewStart: string | null;
+  interviewEnd: string | null;
 };
 
 export type HostRow = {
@@ -89,6 +146,7 @@ export async function getMatchDataForDate(date: string): Promise<MatchData> {
     category: i.category,
   }));
   const interestName = new Map(allInterests.map((i) => [i.id, i.name]));
+  const semantic = await buildSemanticContext(allInterests);
 
   // --- Prospectives for this date ---
   const pRows = await db
@@ -113,6 +171,9 @@ export async function getMatchDataForDate(date: string): Promise<MatchData> {
     fullName: p.fullName,
     grade: p.grade,
     gender: p.gender,
+    interviewerStaffId: p.interviewerStaffId,
+    interviewStart: p.interviewStart,
+    interviewEnd: p.interviewEnd,
     interests: pInterests
       .filter((pi) => pi.prospectiveId === p.id)
       .sort((a, b) => a.priority - b.priority)
@@ -174,6 +235,7 @@ export async function getMatchDataForDate(date: string): Promise<MatchData> {
           b.courseTitle,
           b.courseCode,
           interestRefs,
+          semantic,
         ),
       }));
     return {

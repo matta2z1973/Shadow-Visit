@@ -128,8 +128,9 @@ export function scoreHost(
   let score = 0;
   for (const c of coverage) {
     if (!c.covered) continue;
-    // A class the student actually sees is worth more than a shared hobby.
-    const viaBonus = c.via === "host_class" ? 1 : 0;
+    // A class the student actually sees during the visit is worth
+    // meaningfully more than just sharing a hobby with the host.
+    const viaBonus = c.via === "host_class" ? 2 : 0;
     score += priorityWeight(c.priority) * 2 + viaBonus;
   }
 

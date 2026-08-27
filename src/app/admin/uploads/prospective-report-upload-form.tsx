@@ -19,12 +19,12 @@ export default function ProspectiveReportUploadForm() {
         accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetsml.sheet"
         multiple
         required
-        className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white dark:file:bg-zinc-100 dark:file:text-zinc-900"
+        className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-forest file:px-4 file:py-2 file:text-sm file:font-medium file:text-white dark:file:bg-forest dark:file:text-white"
       />
       <button
         type="submit"
         disabled={pending}
-        className="mt-3 rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
+        className="mt-3 rounded-md bg-forest px-4 py-2 text-sm font-medium text-white disabled:opacity-60 dark:bg-forest dark:text-white"
       >
         {pending ? "Importing…" : "Upload bulk report"}
       </button>

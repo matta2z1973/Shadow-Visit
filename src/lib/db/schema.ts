@@ -10,7 +10,11 @@ import {
   boolean,
   index,
   uniqueIndex,
+  vector,
 } from "drizzle-orm/pg-core";
+
+// Course catalog embeddings use OpenAI text-embedding-3-small (1536 dims).
+export const COURSE_EMBEDDING_DIMENSIONS = 1536;
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -94,11 +98,47 @@ export const interests = pgTable(
     category: text("category").notNull(), // one of CATEGORY_SLUGS
     active: boolean("active").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
+    // Cached embedding of the interest name, computed lazily on first use in
+    // matching (see src/lib/matching/loader.ts) so repeated match runs don't
+    // re-call the embeddings API. Null until then, or if no OpenAI key is set.
+    embedding: vector("embedding", { dimensions: COURSE_EMBEDDING_DIMENSIONS }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
   (t) => [uniqueIndex("interests_name_idx").on(t.name)],
+);
+
+// ---------------------------------------------------------------------------
+// Course catalog (uploaded by admin, embedded for semantic interest matching)
+// ---------------------------------------------------------------------------
+
+// One row per school course. `embedding` is generated from title+description
+// via OpenAI at upload time (see src/lib/llm/embeddings.ts) and compared
+// against embedded interest tags to decide whether a host's scheduled class
+// covers a prospective's interest — see src/lib/matching/course-map.ts.
+export const courses = pgTable(
+  "courses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code"), // catalog course code, matched against host_schedule_blocks.course_code
+    title: text("title").notNull(),
+    description: text("description"),
+    embedding: vector("embedding", { dimensions: COURSE_EMBEDDING_DIMENSIONS }),
+    importBatchId: uuid("import_batch_id").references(() => importBatches.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("courses_code_idx").on(t.code),
+    index("courses_title_idx").on(t.title),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -221,11 +261,13 @@ export const prospectiveStudents = pgTable(
     interviewEnd: time("interview_end"),
     additionalInfo: text("additional_info"), // free-text response
     familyEmail: text("family_email"),
-    // Assigned admissions counselor (may not be a login user).
-    counselorStaffId: uuid("counselor_staff_id").references(() => staff.id, {
+    // Assigned admissions interviewer (may not be a login user). TS-level
+    // rename from "counselor" — SQL column names kept as-is to avoid a
+    // migration; interviewer == admissions staff who conducts the interview.
+    interviewerStaffId: uuid("counselor_staff_id").references(() => staff.id, {
       onDelete: "set null",
     }),
-    counselorNameRaw: text("counselor_name_raw"), // as it arrived in the CSV
+    interviewerNameRaw: text("counselor_name_raw"), // as it arrived in the CSV
     importBatchId: uuid("import_batch_id").references(() => importBatches.id, {
       onDelete: "set null",
     }),
@@ -289,6 +331,28 @@ export const facultyInterests = pgTable(
       .notNull(),
   },
   (t) => [uniqueIndex("faculty_interest_idx").on(t.staffId, t.interestId)],
+);
+
+// Recurring interview-slot template for one admissions staff member: a date
+// range, which weekdays it applies to, and which 30-min blocks (8am-3pm) are
+// open. Interview scheduling for prospectives is generated from these rather
+// than from the interviewer's live calendar.
+export const interviewerAvailability = pgTable(
+  "interviewer_availability",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    staffId: uuid("staff_id")
+      .references(() => staff.id, { onDelete: "cascade" })
+      .notNull(),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date").notNull(),
+    weekdays: integer("weekdays").array().notNull(), // ISO weekday: 1=Mon .. 5=Fri
+    timeBlocks: text("time_blocks").array().notNull(), // 30-min block start times, "HH:MM" (e.g. "08:00")
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("interviewer_availability_staff_idx").on(t.staffId)],
 );
 
 // Manual free-time blocks (v1). Later replaced/augmented by polled feed busy times.

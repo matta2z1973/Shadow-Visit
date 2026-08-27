@@ -58,7 +58,7 @@ export default async function AdminDashboard() {
       </div>
 
       <div className="mt-8 flex flex-wrap gap-3 text-sm">
-        <Link href="/admin/uploads" className="rounded-md bg-zinc-900 px-4 py-2 font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+        <Link href="/admin/prospectives/upload" className="rounded-md bg-forest px-4 py-2 font-medium text-white dark:bg-forest dark:text-white">
           Upload data
         </Link>
         <Link href="/admin/match" className="rounded-md border border-zinc-300 px-4 py-2 dark:border-zinc-700">

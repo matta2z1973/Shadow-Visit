@@ -27,7 +27,7 @@ const schema = z.object({
   gender: z.enum(["M", "F"]).optional().or(z.literal("")),
   currentSchool: z.string().trim().max(200).optional(),
   familyEmail: z.string().trim().email().optional().or(z.literal("")),
-  counselorStaffId: z.string().uuid().optional().or(z.literal("")),
+  interviewerStaffId: z.string().uuid().optional().or(z.literal("")),
   wantsShadow: z.coerce.boolean().optional(),
 });
 
@@ -41,7 +41,7 @@ export async function updateProspective(formData: FormData) {
     gender: formData.get("gender") || "",
     currentSchool: formData.get("currentSchool") || undefined,
     familyEmail: formData.get("familyEmail") || "",
-    counselorStaffId: formData.get("counselorStaffId") || "",
+    interviewerStaffId: formData.get("interviewerStaffId") || "",
     wantsShadow: formData.get("wantsShadow") === "on",
   });
   if (!parsed.success) return;
@@ -58,7 +58,7 @@ export async function updateProspective(formData: FormData) {
       gender: (parsed.data.gender || null) as "M" | "F" | null,
       currentSchool: parsed.data.currentSchool ?? null,
       familyEmail: parsed.data.familyEmail || null,
-      counselorStaffId: parsed.data.counselorStaffId || null,
+      interviewerStaffId: parsed.data.interviewerStaffId || null,
       wantsShadow: parsed.data.wantsShadow ?? false,
       shadowDate: orNull(formData.get("shadowDate")),
       interviewDate: orNull(formData.get("interviewDate")),

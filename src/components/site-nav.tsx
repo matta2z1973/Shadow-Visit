@@ -18,12 +18,8 @@ export default async function SiteNav() {
           href="/"
           className="mr-3 flex items-center gap-2 border-zinc-200 pr-4 dark:border-zinc-800 sm:border-r"
         >
-          <span
-            aria-hidden
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-800 text-xs font-bold leading-none text-white shadow-sm"
-          >
-            SV
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element -- small static brand mark, no need for next/image optimization */}
+          <img src="/greenhill-g.svg" alt="" aria-hidden className="h-8 w-8" />
           <span className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
             Shadow Visit
           </span>
@@ -35,26 +31,17 @@ export default async function SiteNav() {
               <Link href="/admin" className={linkCls}>
                 Dashboard
               </Link>
-              <Link href="/admin/uploads" className={linkCls}>
-                Uploads
-              </Link>
-              <Link href="/admin/match" className={linkCls}>
-                Match
-              </Link>
               <Link href="/admin/prospectives" className={linkCls}>
                 Prospectives
               </Link>
               <Link href="/admin/hosts" className={linkCls}>
                 Hosts
               </Link>
+              <Link href="/admin/match" className={linkCls}>
+                Match
+              </Link>
               <Link href="/admin/interests" className={linkCls}>
-                Interests
-              </Link>
-              <Link href="/admin/staff" className={linkCls}>
-                Staff
-              </Link>
-              <Link href="/admin/availability" className={linkCls}>
-                Availability
+                Settings
               </Link>
             </>
           ) : (
@@ -67,7 +54,7 @@ export default async function SiteNav() {
         <div className="ml-auto flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
           <span className="hidden sm:inline">{user.fullName ?? user.email}</span>
           {isAdmin ? (
-            <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+            <span className="rounded bg-forest px-1.5 py-0.5 text-xs font-medium text-white dark:bg-forest dark:text-white">
               admin
             </span>
           ) : null}

@@ -8,7 +8,9 @@ import {
   getMatchDataForDate,
   type MatchData,
 } from "@/lib/matching/loader";
+import { getOpenInterviewSlots } from "@/lib/matching/interview-slots";
 import { confirmMatch, bulkConfirmBest } from "./actions";
+import { INTERVIEW_TIME_BLOCKS } from "@/lib/schedule/interview-blocks";
 import EmailSchedulesButton from "./email-schedules-button";
 
 export const dynamic = "force-dynamic";
@@ -43,12 +45,12 @@ export default async function MatchPage({
       <main className="mx-auto w-full max-w-4xl px-6 py-10">
         <h1 className="text-2xl font-semibold tracking-tight">Run matching</h1>
         <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
-          No prospective students with a shadow date yet. Upload Interview &amp;
-          Visit Form PDFs on the{" "}
-          <Link href="/admin/uploads" className="underline">
-            Uploads
+          No prospective students with a shadow date yet. Upload a FinalSite bulk
+          report on the{" "}
+          <Link href="/admin/prospectives/upload" className="underline">
+            Upload
           </Link>{" "}
-          page.
+          tab under Prospectives.
         </p>
       </main>
     );
@@ -69,6 +71,17 @@ export default async function MatchPage({
   const matchByProspective = new Map(existing.map((m) => [m.prospectiveId, m]));
 
   const hostName = new Map(data.hosts.map((h) => [h.id, h.fullName]));
+  const timeBlockLabel = new Map(INTERVIEW_TIME_BLOCKS.map((b) => [b.start, b.label]));
+
+  // Per-prospective so each one's own already-booked slot stays selectable
+  // when re-confirming (see getOpenInterviewSlots' exclude param).
+  const openSlotsByProspective = new Map(
+    await Promise.all(
+      data.prospectives.map(
+        async (p) => [p.id, await getOpenInterviewSlots(date, p.id)] as const,
+      ),
+    ),
+  );
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10">
@@ -82,7 +95,7 @@ export default async function MatchPage({
               href={`/admin/match?date=${d}`}
               className={
                 d === date
-                  ? "rounded bg-zinc-900 px-2 py-1 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  ? "rounded bg-forest px-2 py-1 text-white dark:bg-forest dark:text-white"
                   : "rounded px-2 py-1 underline-offset-2 hover:underline"
               }
             >
@@ -114,7 +127,7 @@ export default async function MatchPage({
           </Link>
           <form action={bulkConfirmBest}>
             <input type="hidden" name="date" value={date} />
-            <button className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+            <button className="rounded-md bg-forest px-3 py-1.5 text-sm font-medium text-white dark:bg-forest dark:text-white">
               Confirm best for all
             </button>
           </form>
@@ -191,21 +204,36 @@ export default async function MatchPage({
                   </label>
 
                   <label className="flex flex-col gap-1 text-sm">
-                    <span className="font-medium">Counselor</span>
+                    <span className="font-medium">Interview slot</span>
                     <select
-                      name="counselorStaffId"
+                      name="interviewSlot"
+                      defaultValue={
+                        confirmed && p.interviewerStaffId && p.interviewStart
+                          ? `${p.interviewerStaffId}::${p.interviewStart.slice(0, 5)}`
+                          : ""
+                      }
                       className="rounded-md border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
                     >
                       <option value="">—</option>
-                      {admissionsStaff.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.fullName}
-                        </option>
-                      ))}
+                      {admissionsStaff.map((s) => {
+                        const slots = (openSlotsByProspective.get(p.id) ?? []).filter(
+                          (slot) => slot.staffId === s.id,
+                        );
+                        if (!slots.length) return null;
+                        return (
+                          <optgroup key={s.id} label={s.fullName}>
+                            {slots.map((slot) => (
+                              <option key={slot.start} value={`${s.id}::${slot.start}`}>
+                                {timeBlockLabel.get(slot.start) ?? slot.start}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
                     </select>
                   </label>
 
-                  <button className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+                  <button className="rounded-md bg-forest px-4 py-2 text-sm font-medium text-white dark:bg-forest dark:text-white">
                     {confirmed ? "Update" : "Confirm"}
                   </button>
                 </form>

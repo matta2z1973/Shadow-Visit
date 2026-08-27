@@ -20,6 +20,7 @@
     "test:parsers": "tsx scripts/test-parsers.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.121.0",
     "@hookform/resolvers": "^5.2.2",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.3",
@@ -29,6 +30,7 @@
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.14.0",
     "next": "16.2.4",
+    "openai": "^7.7.0",
     "pdfjs-dist": "^5.7.284",
     "postgres": "^3.4.9",
     "react": "19.2.4",

@@ -1,16 +1,16 @@
-import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { importBatches } from "@/lib/db/schema";
 import { desc } from "drizzle-orm";
-import ProspectiveReportUploadForm from "./prospective-report-upload-form";
+import ProspectivesTabs from "@/components/prospectives-tabs";
+import ProspectiveReportUploadForm from "../../uploads/prospective-report-upload-form";
 
 export const dynamic = "force-dynamic";
 
 const card =
   "rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950";
 
-export default async function UploadsPage() {
+export default async function ProspectivesUploadPage() {
   await requireAdmin();
   const recent = await db
     .select()
@@ -20,25 +20,9 @@ export default async function UploadsPage() {
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Uploads</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Prospective students</h1>
 
-      <section className={`${card} mt-6`}>
-        <h2 className="text-lg font-semibold">Host schedules</h2>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          No file to upload here anymore — each host saves their Outlook
-          calendar link on the{" "}
-          <Link href="/admin/hosts" className="underline">
-            Hosts page
-          </Link>{" "}
-          (either themselves at <code>/me</code>, or you can enter it for them
-          there). Schedules sync from that link automatically whenever
-          matching runs, or on demand from the{" "}
-          <Link href="/admin/hosts/schedules" className="underline">
-            Schedules
-          </Link>{" "}
-          tab&rsquo;s refresh button.
-        </p>
-      </section>
+      <ProspectivesTabs active="upload" />
 
       <section className={`${card} mt-6`}>
         <h2 className="text-lg font-semibold">Prospective students (FinalSite)</h2>
@@ -51,13 +35,6 @@ export default async function UploadsPage() {
           record before matching runs (gender is a hard filter).
         </p>
         <ProspectiveReportUploadForm />
-      </section>
-
-      <section className={`${card} mt-6 opacity-70`}>
-        <h2 className="text-lg font-semibold">Course catalog</h2>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Phase 2 — builds the vector store for interest→course matching.
-        </p>
       </section>
 
       <section className="mt-10">

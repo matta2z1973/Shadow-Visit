@@ -35,7 +35,7 @@ export default async function SchedulePrint({
   const detail = await getMatchDetail(matchId);
   if (!detail) notFound();
 
-  const { prospective, host, counselorName, match, timeline } = detail;
+  const { prospective, host, interviewerName, match, timeline } = detail;
 
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-10 print:py-4">
@@ -73,8 +73,8 @@ export default async function SchedulePrint({
           <dd className="font-medium">{host?.fullName ?? "—"}</dd>
         </div>
         <div>
-          <dt className="text-zinc-500">Admissions counselor</dt>
-          <dd className="font-medium">{counselorName ?? "—"}</dd>
+          <dt className="text-zinc-500">Admissions interviewer</dt>
+          <dd className="font-medium">{interviewerName ?? "—"}</dd>
         </div>
         <div>
           <dt className="text-zinc-500">Current school</dt>
