@@ -649,29 +649,87 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
     on `<html>` — the class-based variant is already set up for that, just
     unused.
 
+14. **Magic-link sign-in fixed end-to-end via Resend + Supabase Auth SMTP,
+    admin bypass removed** (2026-08-27, same day). `resend.greenhillinnovation.org`
+    (a subdomain, not the apex `greenhillinnovation.org` — that one's still
+    `pending` in Resend, paused in favor of the subdomain path) got verified
+    in Resend (DKIM + SPF both green). `EMAIL_FROM` updated to
+    `admissions@resend.greenhillinnovation.org` in `.env.local` and on Vercel.
+    That alone does **not** touch magic-link — Supabase Auth's own built-in
+    mailer (not the app's Resend calls) sends OTP/magic-link emails, and its
+    SMTP config was `null` (unconfigured), so it was using Supabase's own
+    low-limit default mailer this whole time. Fixed via the Supabase
+    Management API (`PATCH /v1/projects/<ref>/config/auth`):
+    `smtp_host: smtp.resend.com`, `smtp_port: 587`, `smtp_user: resend`,
+    `smtp_pass: <RESEND_API_KEY>` (Resend accepts the API key as the SMTP
+    password), `smtp_sender_name`, `smtp_admin_email`. Two more silent
+    breakages found and fixed along the way, both worth remembering for any
+    future domain/env change:
+    - `site_url`/`uri_allow_list` were still `http://localhost:3000` (the
+      Supabase project default) — Supabase Auth ignores `emailRedirectTo`
+      if it's not on the allow-list and silently falls back to `site_url`,
+      so the emailed link kept pointing at localhost even after `EMAIL_FROM`
+      and `APP_URL` were both fixed. Updated both to the production URL
+      (keeping localhost entries in the allow-list too, for local dev).
+    - Vercel's `APP_URL` was still `http://localhost:3001`, copied over from
+      `.env.local` at initial deploy and never updated — `src/app/login/actions.ts`
+      prefers `process.env.APP_URL` over the request's own host header when
+      building `emailRedirectTo`, so this alone was enough to send production
+      users a localhost link. Updated to the production URL.
+    - `rate_limit_email_sent` (Supabase's project-wide auth-email cap) was
+      still at its default of 2/hour, sized for the default mailer — trips
+      "email rate limit exceeded" almost immediately once you're actually
+      testing sign-in repeatedly. Raised to 100/hour now that Resend is the
+      real relay.
+    Verified via the Resend API (`GET /emails`) that a real
+    `signInWithOtp`-triggered "Your sign-in link" email (not just a manual
+    test send) shows `last_event: "delivered"`.
+    With magic-link confirmed working, removed the temporary
+    `/login/bypass` route entirely (deleted `src/app/login/bypass/`, the
+    `ADMIN_BYPASS_COOKIE`/`getBypassProfile()` logic in `src/lib/auth.ts`,
+    the cookie-clear line in `src/app/logout/route.ts`, and
+    `ADMIN_BYPASS_TOKEN` from both `.env.local` and Vercel). Also: promoted
+    `riversf@greenhill.org` to admin (created via the Supabase Auth Admin
+    API since they'd never signed in before, so no `profiles` row existed
+    yet — the `on_auth_user_created` trigger in `drizzle/bootstrap.sql`
+    creates it automatically once the `auth.users` row exists; then set
+    `role = 'admin'` directly), alongside the existing
+    `abbondanziom@greenhill.org` admin. Removed the personal
+    `{user.fullName ?? user.email}` display from the admin header in
+    `src/components/site-nav.tsx` — the admin badge and sign-out control
+    remain, just not a specific person's name.
+
 ## Git status
 
-**Fully committed and pushed to `origin/main`** as of 2026-08-26 — three
-commits: `143a566` ("Add view-as-student toggle, bulk prospective import,
-and synced host schedules"), `478dda7` ("Simplify Uploads page and improve
-the student schedule-link flow", items 6-7), and `8f00c7b` ("Add
-email-schedule-to-host via Resend; fix bulk import gender/interests",
-items 3 and 9). Every push since `vercel link` connected this repo
-auto-triggers a production deploy — confirmed again for `8f00c7b` (new
-deployment, "Ready", 36s build). Item 8 (`EMAIL_FROM` fix) was a
-Vercel-only env change with nothing to commit. Working tree is clean except:
+**Fully committed and pushed to `origin/main`** as of 2026-08-27 — commits
+through `4a3db3b` ("Swap Staff sub-tab order to Admissions, Faculty") and
+`7537b16` ("Add AI-powered matching, interviewer scheduling, nav
+restructure, and real Greenhill branding" — this one includes the temporary
+`/login/bypass` route, committed deliberately per user decision at the time
+since magic-link wasn't yet confirmed working), plus whatever commit follows
+this README update for item 14 above (Resend/Supabase SMTP fix, admin
+bypass removal, admin promotions, header cleanup). Every push since
+`vercel link` connected this repo auto-triggers a production deploy. Note:
+item 14's Resend-domain and Supabase Auth SMTP/rate-limit/redirect-URL
+changes are **remote config, not code** — they took effect immediately via
+the Supabase Management API and don't require a deploy; only the bypass
+removal and header/admin-promotion changes are actual commits. Working tree
+is clean except:
 
 ```
 ?? "Test Report-test.xlsx"        (real-looking student data — never commit)
 ?? "host ICS.ics"                 (real-looking student data — never commit)
 ?? "host schedule by block.xls"   (real-looking student data — never commit)
+?? "PRD Notes.docx"               (unrecognized file, user chose to leave out of git)
 ```
 
-These three are deliberately excluded from every commit (staged with
+These are deliberately excluded from every commit (staged with
 `git add -A -- ':!<file>' ...` pathspec exclusions, not just "forgot to add
-them") — real student PII sitting in plain repo-root files, not under the
-gitignored `/fixtures/` convention. Don't add them to git even incidentally
-(e.g. via a bare `git add -A`).
+them") — the first three are real student PII sitting in plain repo-root
+files, not under the gitignored `/fixtures/` convention. `PRD Notes.docx`
+is unrecognized and the user asked to leave it out until they say otherwise.
+Don't add any of these to git even incidentally (e.g. via a bare
+`git add -A`).
 
 Per standing policy, future commits/pushes still need the user's explicit
 ask each time — this one was requested directly.

@@ -52,7 +52,6 @@ export default async function SiteNav() {
         </div>
 
         <div className="ml-auto flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
-          <span className="hidden sm:inline">{user.fullName ?? user.email}</span>
           {isAdmin ? (
             <span className="rounded bg-forest px-1.5 py-0.5 text-xs font-medium text-white dark:bg-forest dark:text-white">
               admin
