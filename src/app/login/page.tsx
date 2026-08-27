@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { requestOtp, verifyOtp, type LoginState } from "./actions";
 
 const initial: LoginState = { phase: "idle" };
@@ -15,6 +15,14 @@ export default function LoginPage() {
 
   // Splash defaults to email-only sign in; "Create account" reveals name fields.
   const [mode, setMode] = useState<"signin" | "create">("signin");
+
+  // Trying to sign in with an email that has no account routes here
+  // automatically. Using an effect (rather than deriving `creating` directly
+  // from reqState) keeps the manual "Sign in"/"Create account" toggle
+  // working afterward instead of getting stuck on "create".
+  useEffect(() => {
+    if (reqState.phase === "needs_signup") setMode("create");
+  }, [reqState]);
 
   // Post-submit we show "check your email"; the code entry is a fallback only.
   const [showCode, setShowCode] = useState(false);
@@ -116,6 +124,8 @@ export default function LoginPage() {
   const inputCls =
     "rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900";
   const creating = mode === "create";
+  const prefillEmail =
+    reqState.phase === "needs_signup" ? reqState.email : undefined;
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-6 px-6 py-16">
@@ -147,11 +157,13 @@ export default function LoginPage() {
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">School email</span>
           <input
+            key={prefillEmail ?? "email-input"}
             name="email"
             type="email"
             autoComplete="email"
             required
             autoFocus={!creating}
+            defaultValue={prefillEmail}
             className={inputCls}
           />
         </label>
@@ -167,6 +179,12 @@ export default function LoginPage() {
               ? "Create account & email code"
               : "Email me a sign-in code"}
         </button>
+
+        {reqState.phase === "needs_signup" ? (
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            {reqState.message}
+          </p>
+        ) : null}
 
         {reqState.phase === "error" ? (
           <p className="text-sm text-red-700 dark:text-red-400">

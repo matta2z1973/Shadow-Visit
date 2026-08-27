@@ -3,7 +3,10 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { z } from "zod";
+import { ilike } from "drizzle-orm";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
+import { profiles } from "@/lib/db/schema";
 
 const requestSchema = z.object({
   email: z.string().email(),
@@ -13,6 +16,7 @@ const requestSchema = z.object({
 
 export type LoginState =
   | { phase: "idle" }
+  | { phase: "needs_signup"; email: string; message: string }
   | { phase: "code_sent"; email: string; message: string }
   | { phase: "error"; message: string };
 
@@ -35,6 +39,25 @@ export async function requestOtp(
       .map((s) => (s ?? "").trim())
       .filter(Boolean)
       .join(" ") || undefined;
+
+  // Sign-in mode (no name given) must not silently create an account for an
+  // email nobody has registered — send people through "Create account" first
+  // instead, where they set their name.
+  if (!fullName) {
+    const [existing] = await db
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(ilike(profiles.email, parsed.data.email))
+      .limit(1);
+    if (!existing) {
+      return {
+        phase: "needs_signup",
+        email: parsed.data.email,
+        message:
+          "We don't have an account for that email yet. Enter your name below to create one.",
+      };
+    }
+  }
 
   const supabase = await createSupabaseServerClient();
   const headerList = await headers();
