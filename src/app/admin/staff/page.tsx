@@ -175,11 +175,11 @@ export default async function StaffAdmin({
       <SettingsTabs active="staff" />
 
       <div className="mt-4 flex gap-2">
-        <Link href="/admin/staff?tab=faculty" className={tabCls("faculty")}>
-          Faculty
-        </Link>
         <Link href="/admin/staff?tab=admissions" className={tabCls("admissions")}>
           Admissions
+        </Link>
+        <Link href="/admin/staff?tab=faculty" className={tabCls("faculty")}>
+          Faculty
         </Link>
       </div>
 
