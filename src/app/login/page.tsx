@@ -1,13 +1,32 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { Suspense, useActionState, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { requestOtp, verifyOtp, type LoginState } from "./actions";
 
 const initial: LoginState = { phase: "idle" };
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const [reqState, reqAction, sending] = useActionState(requestOtp, initial);
   const [verState, verAction, verifying] = useActionState(verifyOtp, initial);
+
+  // /auth/callback redirects here with ?error=... when the emailed link's
+  // code exchange fails (e.g. an email scanner like Outlook Safe Links
+  // "pre-clicked" the link and used up its single-use code before the real
+  // click happened, or the link was opened in a different browser than the
+  // one that requested it, so the PKCE verifier cookie isn't there). The
+  // numeric code fallback below doesn't have either problem, so surface this
+  // clearly and point people at it.
+  const searchParams = useSearchParams();
+  const callbackError = searchParams.get("error");
 
   // Local override so user can hit "Use a different email" without losing the
   // server state we already have.
@@ -139,6 +158,19 @@ export default function LoginPage() {
             : "Enter your school email and we’ll send you a sign-in code."}
         </p>
       </div>
+
+      {callbackError ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
+          <p className="font-medium">The sign-in link didn&rsquo;t work ({callbackError}).</p>
+          <p className="mt-1">
+            This usually happens when an email scanner opens the link before
+            you do, or the link is opened on a different device/browser than
+            the one that requested it. Request a new code below, then use
+            &ldquo;Link didn&rsquo;t work? Enter the code instead&rdquo; on the
+            next screen — typing the code always works.
+          </p>
+        </div>
+      ) : null}
 
       <form action={reqAction} className="flex flex-col gap-4">
         {creating ? (
