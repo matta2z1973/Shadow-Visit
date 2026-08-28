@@ -43,9 +43,6 @@ function LoginForm() {
     if (reqState.phase === "needs_signup") setMode("create");
   }, [reqState]);
 
-  // Post-submit we show "check your email"; the code entry is a fallback only.
-  const [showCode, setShowCode] = useState(false);
-
   // After a request succeeds we show the verify form. If verification fails,
   // verState.phase will be "code_sent" again with an error message; either way
   // we want to render the verify form once we're past the initial step.
@@ -66,76 +63,61 @@ function LoginForm() {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-6 px-6 py-16">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Check your email</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Enter your sign-in code</h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            We sent a sign-in link to <strong>{email}</strong>. Open the email and
-            click the link to sign in — you can close this tab.
+            We emailed a sign-in code to <strong>{email}</strong>. Enter it below.
           </p>
         </div>
 
-        {!showCode ? (
-          <div className="flex flex-col gap-3 text-sm">
-            <button
-              type="button"
-              onClick={() => setShowCode(true)}
-              className="text-left text-zinc-600 underline-offset-4 hover:underline dark:text-zinc-400"
-            >
-              Link didn&rsquo;t work? Enter the code instead
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowCode(false);
-                setRestartKey((k) => k + 1);
-              }}
-              className="text-left text-xs text-zinc-500 underline-offset-4 hover:underline"
-            >
-              ← Use a different email
-            </button>
-          </div>
-        ) : (
-          <form action={verAction} className="flex flex-col gap-4">
-            <input type="hidden" name="email" value={email} />
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium">Sign-in code from the email</span>
-              <input
-                name="code"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                pattern="\d{4,10}"
-                maxLength={10}
-                required
-                autoFocus
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-center font-mono text-lg tracking-[0.3em] focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
-                placeholder="12345678"
-              />
-            </label>
+        <form action={verAction} className="flex flex-col gap-4">
+          <input type="hidden" name="email" value={email} />
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium">Sign-in code from the email</span>
+            <input
+              name="code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="\d{4,10}"
+              maxLength={10}
+              required
+              autoFocus
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-center font-mono text-lg tracking-[0.3em] focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+              placeholder="12345678"
+            />
+          </label>
 
-            <button
-              type="submit"
-              disabled={verifying}
-              className="rounded-md bg-forest px-4 py-2 text-sm font-medium text-white hover:bg-forest/90 disabled:opacity-60 dark:bg-forest dark:text-white"
-            >
-              {verifying ? "Signing in..." : "Sign in"}
-            </button>
+          <button
+            type="submit"
+            disabled={verifying}
+            className="rounded-md bg-forest px-4 py-2 text-sm font-medium text-white hover:bg-forest/90 disabled:opacity-60 dark:bg-forest dark:text-white"
+          >
+            {verifying ? "Signing in..." : "Sign in"}
+          </button>
 
-            {verifyMessage ? (
-              <p className="text-sm text-red-700 dark:text-red-400">{verifyMessage}</p>
-            ) : null}
+          {verifyMessage ? (
+            <p className="text-sm text-red-700 dark:text-red-400">{verifyMessage}</p>
+          ) : null}
 
-            <button
-              type="button"
-              onClick={() => {
-                setShowCode(false);
-                setRestartKey((k) => k + 1);
-              }}
-              className="text-left text-xs text-zinc-600 underline-offset-4 hover:underline dark:text-zinc-400"
-            >
-              ← Use a different email
-            </button>
-          </form>
-        )}
+          {/* The email also contains a clickable link, but school email
+              scanners (e.g. Outlook Safe Links) pre-fetch every link before
+              delivery, which burns its single use — so it reliably fails for
+              @greenhill.org inboxes. The code above always works; mention
+              the link only as an aside, not the primary path. */}
+          <p className="text-xs text-zinc-500 dark:text-zinc-500">
+            The email also has a sign-in link, but it may not work depending
+            on your email provider&rsquo;s security scanning — the code above
+            is the reliable option.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => setRestartKey((k) => k + 1)}
+            className="text-left text-xs text-zinc-600 underline-offset-4 hover:underline dark:text-zinc-400"
+          >
+            ← Use a different email
+          </button>
+        </form>
       </main>
     );
   }
@@ -165,9 +147,9 @@ function LoginForm() {
           <p className="mt-1">
             This usually happens when an email scanner opens the link before
             you do, or the link is opened on a different device/browser than
-            the one that requested it. Request a new code below, then use
-            &ldquo;Link didn&rsquo;t work? Enter the code instead&rdquo; on the
-            next screen — typing the code always works.
+            the one that requested it. Request a new code below and enter it
+            on the next screen — typing the code always works, even when the
+            link doesn&rsquo;t.
           </p>
         </div>
       ) : null}
