@@ -22,6 +22,17 @@ const client = postgres(connectionString, {
   max: 1,
   idle_timeout: 20,
   max_lifetime: 60 * 30,
+  // idle_timeout only catches connections sitting genuinely idle — it does
+  // nothing for one stuck ACTIVE mid-command (Postgres shows this as waiting
+  // on "ClientRead": it finished executing and is waiting to hand results to
+  // a client that died without a clean disconnect, e.g. an aborted request
+  // or a frozen serverless invocation). Postgres has no default timeout for
+  // that case and will wait forever otherwise. statement_timeout bounds the
+  // whole command lifecycle, so Postgres force-closes it instead of leaving
+  // a pool slot stranded — this is what was hanging the whole site earlier.
+  connection: {
+    statement_timeout: 30_000,
+  },
 });
 
 export const db = drizzle(client, { schema });
