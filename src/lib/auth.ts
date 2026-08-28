@@ -30,12 +30,24 @@ export async function getCurrentUser(): Promise<AppUser | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const [row] = await db
-    .select()
-    .from(profiles)
-    .where(eq(profiles.id, user.id))
-    .limit(1);
-  const profile: Profile | null = row ?? null;
+  let profile: Profile | null;
+  try {
+    const [row] = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.id, user.id))
+      .limit(1);
+    profile = row ?? null;
+  } catch (err) {
+    // A transient DB failure here (e.g. a stalled connection getting
+    // force-cancelled by statement_timeout) must not become an unhandled
+    // rejection — that crashes the whole serverless process for every
+    // concurrent request it's handling, not just this one. Degrade to
+    // "not signed in" so the caller redirects to /login instead of the
+    // process dying outright; the user can just retry.
+    console.error("getCurrentUser: profile lookup failed", err);
+    return null;
+  }
   if (!profile) return null;
 
   let role: AppUser["role"] = profile.role;
