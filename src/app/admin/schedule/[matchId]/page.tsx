@@ -52,6 +52,7 @@ export default async function SchedulePrint({
         <div className="flex items-start gap-2 print:hidden">
           <Link
             href={`/admin/schedule/${matchId}/ics`}
+            prefetch={false}
             className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
           >
             Download .ics

@@ -11,10 +11,10 @@ export default function HostsTabs({
       : "rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700";
   return (
     <div className="mt-4 flex gap-2">
-      <Link href="/admin/hosts" className={cls("roster")}>
+      <Link href="/admin/hosts" prefetch={false} className={cls("roster")}>
         Roster
       </Link>
-      <Link href="/admin/hosts/schedules" className={cls("schedules")}>
+      <Link href="/admin/hosts/schedules" prefetch={false} className={cls("schedules")}>
         Schedules
       </Link>
     </div>

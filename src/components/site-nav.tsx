@@ -28,24 +28,24 @@ export default async function SiteNav() {
         <div className="flex items-center gap-4 text-sm">
           {isAdmin ? (
             <>
-              <Link href="/admin" className={linkCls}>
+              <Link href="/admin" prefetch={false} className={linkCls}>
                 Dashboard
               </Link>
-              <Link href="/admin/prospectives" className={linkCls}>
+              <Link href="/admin/prospectives" prefetch={false} className={linkCls}>
                 Prospectives
               </Link>
-              <Link href="/admin/hosts" className={linkCls}>
+              <Link href="/admin/hosts" prefetch={false} className={linkCls}>
                 Hosts
               </Link>
-              <Link href="/admin/match" className={linkCls}>
+              <Link href="/admin/match" prefetch={false} className={linkCls}>
                 Match
               </Link>
-              <Link href="/admin/interests" className={linkCls}>
+              <Link href="/admin/interests" prefetch={false} className={linkCls}>
                 Settings
               </Link>
             </>
           ) : (
-            <Link href="/me" className={linkCls}>
+            <Link href="/me" prefetch={false} className={linkCls}>
               My interests
             </Link>
           )}

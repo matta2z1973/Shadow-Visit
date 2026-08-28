@@ -48,7 +48,7 @@ export default async function AdminDashboard() {
 
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         {stats.map((s) => (
-          <Link key={s.label} href={s.href} className={card}>
+          <Link key={s.label} href={s.href} prefetch={false} className={card}>
             <div className="text-3xl font-semibold">{s.value}</div>
             <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               {s.label}
@@ -58,16 +58,16 @@ export default async function AdminDashboard() {
       </div>
 
       <div className="mt-8 flex flex-wrap gap-3 text-sm">
-        <Link href="/admin/prospectives/upload" className="rounded-md bg-forest px-4 py-2 font-medium text-white dark:bg-forest dark:text-white">
+        <Link href="/admin/prospectives/upload" prefetch={false} className="rounded-md bg-forest px-4 py-2 font-medium text-white dark:bg-forest dark:text-white">
           Upload data
         </Link>
-        <Link href="/admin/match" className="rounded-md border border-zinc-300 px-4 py-2 dark:border-zinc-700">
+        <Link href="/admin/match" prefetch={false} className="rounded-md border border-zinc-300 px-4 py-2 dark:border-zinc-700">
           Run matching
         </Link>
-        <Link href="/admin/interests" className="rounded-md border border-zinc-300 px-4 py-2 dark:border-zinc-700">
+        <Link href="/admin/interests" prefetch={false} className="rounded-md border border-zinc-300 px-4 py-2 dark:border-zinc-700">
           Manage interests
         </Link>
-        <Link href="/admin/staff" className="rounded-md border border-zinc-300 px-4 py-2 dark:border-zinc-700">
+        <Link href="/admin/staff" prefetch={false} className="rounded-md border border-zinc-300 px-4 py-2 dark:border-zinc-700">
           Staff
         </Link>
       </div>

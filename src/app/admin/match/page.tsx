@@ -47,7 +47,7 @@ export default async function MatchPage({
         <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
           No prospective students with a shadow date yet. Upload a FinalSite bulk
           report on the{" "}
-          <Link href="/admin/prospectives/upload" className="underline">
+          <Link href="/admin/prospectives/upload" prefetch={false} className="underline">
             Upload
           </Link>{" "}
           tab under Prospectives.
@@ -93,6 +93,7 @@ export default async function MatchPage({
             <Link
               key={d}
               href={`/admin/match?date=${d}`}
+              prefetch={false}
               className={
                 d === date
                   ? "rounded bg-forest px-2 py-1 text-white dark:bg-forest dark:text-white"
@@ -121,6 +122,7 @@ export default async function MatchPage({
         <div className="ml-auto flex items-center gap-2">
           <Link
             href={`/admin/match/export?date=${date}`}
+            prefetch={false}
             className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
           >
             Export CSV
@@ -160,6 +162,7 @@ export default async function MatchPage({
                     </Chip>
                     <Link
                       href={`/admin/schedule/${confirmed.id}`}
+                      prefetch={false}
                       className="text-xs underline-offset-2 hover:underline"
                     >
                       Schedule / .ics
