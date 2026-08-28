@@ -44,11 +44,25 @@ export async function requestOtp(
   // email nobody has registered — send people through "Create account" first
   // instead, where they set their name.
   if (!fullName) {
-    const [existing] = await db
-      .select({ id: profiles.id })
-      .from(profiles)
-      .where(ilike(profiles.email, parsed.data.email))
-      .limit(1);
+    let existing: { id: string } | undefined;
+    try {
+      [existing] = await db
+        .select({ id: profiles.id })
+        .from(profiles)
+        .where(ilike(profiles.email, parsed.data.email))
+        .limit(1);
+    } catch (err) {
+      // Must not let a DB failure here become an unhandled rejection — that
+      // crashes the whole serverless process (confirmed in production logs:
+      // exit status 128), taking down every other concurrent request on
+      // that instance, not just this one. Fail this single request instead.
+      console.error("requestOtp: profile existence check failed", err);
+      return {
+        phase: "error",
+        message:
+          "Something went wrong checking your account. Please try again in a moment.",
+      };
+    }
     if (!existing) {
       return {
         phase: "needs_signup",
