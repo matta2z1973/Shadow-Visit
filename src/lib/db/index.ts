@@ -22,6 +22,15 @@ const client = postgres(connectionString, {
   max: 1,
   idle_timeout: 20,
   max_lifetime: 60 * 30,
+  // statement_timeout only bounds a query once a connection is established.
+  // If establishing the connection itself hangs (e.g. the pooler is
+  // unreachable at the TCP level, not just slow to answer queries — seen
+  // directly during the 2026-08 us-west-2 Supabase incident), there's
+  // nothing to cut that off, and the whole function can ride it out to
+  // Vercel's own function-duration ceiling (the 504 FUNCTION_INVOCATION_TIMEOUT
+  // page). Bound connection setup explicitly so a dead pooler fails fast
+  // instead of silently consuming the entire request budget.
+  connect_timeout: 10,
   // idle_timeout only catches connections sitting genuinely idle — it does
   // nothing for one stuck ACTIVE mid-command (Postgres shows this as waiting
   // on "ClientRead": it finished executing and is waiting to hand results to
