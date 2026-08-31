@@ -76,8 +76,20 @@ const client = postgres(connectionString, {
         vector: {
           to: vectorType.oid as number,
           from: [vectorType.oid as number],
-          serialize: (x: number[]) => JSON.stringify(x),
-          parse: (x: string) => JSON.parse(x) as number[],
+          // Pass the raw string straight through in both directions —
+          // drizzle-orm's own `vector` column type already has its own
+          // string <-> number[] mapper (mapToDriverValue/mapFromDriverValue)
+          // and expects to receive/produce a plain Postgres vector literal
+          // string. Registering a parser that itself returns a parsed
+          // number[] (e.g. via JSON.parse) breaks drizzle: it still runs its
+          // own string-parsing logic on whatever comes back, and calling
+          // string methods on an already-parsed array throws. All that's
+          // actually needed here is to tell postgres-js this OID is a known,
+          // ordinary type — that alone is what avoids the slow fallback path
+          // for unregistered types; what the parse function does with the
+          // value doesn't matter for that.
+          serialize: (x: string) => x,
+          parse: (x: string) => x,
         },
       }
     : undefined,
