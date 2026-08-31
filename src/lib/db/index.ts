@@ -13,13 +13,23 @@ if (!connectionString) {
 // sees it as "active, waiting on the client" forever, since the frozen
 // function never resumes to read the result. That ties up a pool slot
 // indefinitely and cascades into hangs for every other request once enough
-// slots are stuck. `max: 1` bounds the blast radius of a stranded connection
-// to a single slot per function instance (Supabase's own recommendation for
-// serverless); `max_lifetime` forces periodic recycling so a connection
+// slots are stuck. `max_lifetime` forces periodic recycling so a connection
 // can't quietly accumulate rot across a long-lived warm instance.
+//
+// This used to be `max: 1`, on the theory that it bounds a stranded
+// connection to a single slot. It backfired: several pages (this one
+// included) run multiple queries via Promise.all() expecting real
+// parallelism, and with only one physical connection postgres-js has no
+// choice but to serialize them onto it — so if even one query is slow, the
+// wait multiplies across every query queued behind it on that connection,
+// compounding into exactly the page-hang symptom this was meant to prevent.
+// The actual stranded-connection risk is now bounded by statement_timeout
+// and connect_timeout below (which force a stuck connection to fail instead
+// of hanging forever), so raising max back up no longer reintroduces that
+// problem — it just restores intra-request concurrency.
 const client = postgres(connectionString, {
   prepare: false,
-  max: 1,
+  max: 4,
   idle_timeout: 20,
   max_lifetime: 60 * 30,
   // statement_timeout only bounds a query once a connection is established.
