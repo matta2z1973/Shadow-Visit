@@ -8,24 +8,31 @@ if (!connectionString) {
   throw new Error("DATABASE_URL is not set");
 }
 
-// postgres-js has no built-in parser for pgvector's `vector` type — its OID
-// is assigned dynamically per database when the extension is created, so it
-// can't be hardcoded. Without a registered parser, postgres-js falls back to
-// generic type handling that is catastrophically slow specifically for this
-// type: `select * from interests` (48 rows, one vector(1536) column) took
-// 2+ minutes end to end despite Postgres's own EXPLAIN ANALYZE showing 0.03ms
-// of actual execution — confirmed directly: casting the same column to
-// ::text instead made the identical query return in 559ms. Every page doing
-// a plain `.select()` on `interests`/`courses` (Hosts, Match, Staff,
-// Interests, Settings, Hosts/Schedules) was hitting this on every load —
-// this was the real cause of those pages hanging, not Supabase
-// infrastructure, despite how much that looked like the explanation over
-// the course of tracking it down. Look up the OID once at startup and
-// register a plain JSON pass-through parser so the driver treats it like
-// any other type instead of whatever slow path it falls back to otherwise.
-const bootstrap = postgres(connectionString, { max: 1 });
-const [vectorType] = await bootstrap`select oid from pg_type where typname = 'vector'`;
-await bootstrap.end();
+// postgres-js has no built-in parser for pgvector's `vector` type. Without
+// one registered, it falls back to generic type handling that is
+// catastrophically slow specifically for this type: `select * from
+// interests` (48 rows, one vector(1536) column) took 2+ minutes end to end
+// despite Postgres's own EXPLAIN ANALYZE showing 0.03ms of actual execution
+// — confirmed directly: casting the same column to ::text instead made the
+// identical query return in 559ms. Every page doing a plain `.select()` on
+// `interests`/`courses` (Hosts, Match, Staff, Interests, Settings,
+// Hosts/Schedules) was hitting this on every load.
+//
+// The type's OID is assigned dynamically per database when the extension is
+// created, so it isn't a fixed constant across arbitrary databases — but an
+// earlier version of this fix looked it up dynamically with a blocking,
+// awaited query at module load time, which was itself a bug: that query
+// gates every single request this function ever handles (Next.js can't
+// start processing a request until the imported module finishes
+// initializing), so any bad luck on that one query hangs the *entire*
+// function regardless of which page was requested — which is exactly the
+// erratic, page-independent hanging pattern that kept showing up even after
+// the vector fix landed. Hardcoding it removes that startup query (and the
+// extra bootstrap connection) entirely. It's stable for as long as this
+// specific database's pgvector extension isn't dropped and recreated; if
+// this project is ever migrated again, re-derive it once with:
+//   select oid from pg_type where typname = 'vector';
+const VECTOR_TYPE_OID = 17174; // shadow-visit-use1 (lqiqowvuvmrotoxtkvyl, us-east-1)
 
 // Serverless (Vercel) functions get frozen between invocations, and a
 // connection that's mid-query when that happens can get stranded — Postgres
@@ -71,28 +78,26 @@ const client = postgres(connectionString, {
   connection: {
     statement_timeout: 30_000,
   },
-  types: vectorType
-    ? {
-        vector: {
-          to: vectorType.oid as number,
-          from: [vectorType.oid as number],
-          // Pass the raw string straight through in both directions —
-          // drizzle-orm's own `vector` column type already has its own
-          // string <-> number[] mapper (mapToDriverValue/mapFromDriverValue)
-          // and expects to receive/produce a plain Postgres vector literal
-          // string. Registering a parser that itself returns a parsed
-          // number[] (e.g. via JSON.parse) breaks drizzle: it still runs its
-          // own string-parsing logic on whatever comes back, and calling
-          // string methods on an already-parsed array throws. All that's
-          // actually needed here is to tell postgres-js this OID is a known,
-          // ordinary type — that alone is what avoids the slow fallback path
-          // for unregistered types; what the parse function does with the
-          // value doesn't matter for that.
-          serialize: (x: string) => x,
-          parse: (x: string) => x,
-        },
-      }
-    : undefined,
+  types: {
+    vector: {
+      to: VECTOR_TYPE_OID,
+      from: [VECTOR_TYPE_OID],
+      // Pass the raw string straight through in both directions —
+      // drizzle-orm's own `vector` column type already has its own
+      // string <-> number[] mapper (mapToDriverValue/mapFromDriverValue)
+      // and expects to receive/produce a plain Postgres vector literal
+      // string. Registering a parser that itself returns a parsed number[]
+      // (e.g. via JSON.parse) breaks drizzle: it still runs its own
+      // string-parsing logic on whatever comes back, and calling string
+      // methods on an already-parsed array throws. All that's actually
+      // needed here is to tell postgres-js this OID is a known, ordinary
+      // type — that alone is what avoids the slow fallback path for
+      // unregistered types; what the parse function does with the value
+      // doesn't matter for that.
+      serialize: (x: string) => x,
+      parse: (x: string) => x,
+    },
+  },
 });
 
 export const db = drizzle(client, { schema });
