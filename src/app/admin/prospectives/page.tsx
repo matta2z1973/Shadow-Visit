@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/schema";
 import { asc, eq, inArray } from "drizzle-orm";
 import ProspectivesTabs from "@/components/prospectives-tabs";
+import PageLoadError from "@/components/page-load-error";
 import { updateProspective, deleteProspective } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -18,19 +19,28 @@ const field =
 export default async function ProspectivesPage() {
   await requireAdmin();
 
-  const rows = await db
-    .select()
-    .from(prospectiveStudents)
-    .orderBy(asc(prospectiveStudents.shadowDate), asc(prospectiveStudents.fullName));
+  let rows: (typeof prospectiveStudents.$inferSelect)[];
+  let pInterests: (typeof prospectiveInterests.$inferSelect)[];
+  let allInterests: (typeof interests.$inferSelect)[];
+  let admissions: (typeof staff.$inferSelect)[];
+  try {
+    rows = await db
+      .select()
+      .from(prospectiveStudents)
+      .orderBy(asc(prospectiveStudents.shadowDate), asc(prospectiveStudents.fullName));
 
-  const ids = rows.map((r) => r.id);
-  const [pInterests, allInterests, admissions] = await Promise.all([
-    ids.length
-      ? db.select().from(prospectiveInterests).where(inArray(prospectiveInterests.prospectiveId, ids))
-      : Promise.resolve([]),
-    db.select().from(interests),
-    db.select().from(staff).where(eq(staff.kind, "admissions")).orderBy(asc(staff.fullName)),
-  ]);
+    const ids = rows.map((r) => r.id);
+    [pInterests, allInterests, admissions] = await Promise.all([
+      ids.length
+        ? db.select().from(prospectiveInterests).where(inArray(prospectiveInterests.prospectiveId, ids))
+        : Promise.resolve([]),
+      db.select().from(interests),
+      db.select().from(staff).where(eq(staff.kind, "admissions")).orderBy(asc(staff.fullName)),
+    ]);
+  } catch (err) {
+    console.error("ProspectivesPage: failed to load data", err);
+    return <PageLoadError />;
+  }
   const interestName = new Map(allInterests.map((i) => [i.id, i.name]));
   const interestsFor = (pid: string) =>
     pInterests

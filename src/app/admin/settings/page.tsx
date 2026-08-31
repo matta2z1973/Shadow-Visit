@@ -4,6 +4,7 @@ import { courses } from "@/lib/db/schema";
 import { desc, sql } from "drizzle-orm";
 import { getLlmSettingsMasked } from "@/lib/llm/settings";
 import SettingsTabs from "@/components/settings-tabs";
+import PageLoadError from "@/components/page-load-error";
 import LlmSettingsForm from "./llm-settings-form";
 import CourseCatalogForm from "./course-catalog-form";
 
@@ -12,11 +13,19 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage() {
   await requireAdmin();
 
-  const [settings, [countRow], [latest]] = await Promise.all([
-    getLlmSettingsMasked(),
-    db.select({ count: sql<number>`count(*)::int` }).from(courses),
-    db.select({ updatedAt: courses.updatedAt }).from(courses).orderBy(desc(courses.updatedAt)).limit(1),
-  ]);
+  let settings: Awaited<ReturnType<typeof getLlmSettingsMasked>>;
+  let countRow: { count: number } | undefined;
+  let latest: { updatedAt: Date | null } | undefined;
+  try {
+    [settings, [countRow], [latest]] = await Promise.all([
+      getLlmSettingsMasked(),
+      db.select({ count: sql<number>`count(*)::int` }).from(courses),
+      db.select({ updatedAt: courses.updatedAt }).from(courses).orderBy(desc(courses.updatedAt)).limit(1),
+    ]);
+  } catch (err) {
+    console.error("SettingsPage: failed to load data", err);
+    return <PageLoadError />;
+  }
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-10">

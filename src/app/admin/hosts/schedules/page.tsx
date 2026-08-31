@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/schema";
 import { asc, eq, inArray } from "drizzle-orm";
 import HostsTabs from "@/components/hosts-tabs";
+import PageLoadError from "@/components/page-load-error";
 import RefreshSchedulesForm from "./refresh-schedules-form";
 import ScheduleCompare, { type HostData } from "./schedule-compare";
 
@@ -30,50 +31,62 @@ export default async function SchedulesPage({
   // Static reads — this tab never talks to Outlook itself. Data here is
   // whatever was last synced, either automatically (matching ran for this
   // date) or via the "Refresh schedules" button below.
-  const hostRows = await db
-    .select()
-    .from(hostStudents)
-    .where(eq(hostStudents.active, true))
-    .orderBy(asc(hostStudents.fullName));
-  const hostIds = hostRows.map((h) => h.id);
-
-  const [hostInterestRows, interestRows] = await Promise.all([
-    hostIds.length
-      ? db
-          .select()
-          .from(hostStudentInterests)
-          .where(inArray(hostStudentInterests.hostStudentId, hostIds))
-      : Promise.resolve([]),
-    db
+  let hostRows: (typeof hostStudents.$inferSelect)[];
+  let interestIdsByHost: Map<string, string[]>;
+  let interestRows: (typeof interests.$inferSelect)[];
+  let dayByHost: Map<string, typeof hostScheduleDays.$inferSelect>;
+  let blocks: (typeof hostScheduleBlocks.$inferSelect)[];
+  let lastUpdated: Date | null;
+  try {
+    hostRows = await db
       .select()
-      .from(interests)
-      .where(eq(interests.active, true))
-      .orderBy(asc(interests.category), asc(interests.name)),
-  ]);
-  const interestIdsByHost = new Map<string, string[]>();
-  for (const hi of hostInterestRows) {
-    const list = interestIdsByHost.get(hi.hostStudentId) ?? [];
-    list.push(hi.interestId);
-    interestIdsByHost.set(hi.hostStudentId, list);
-  }
+      .from(hostStudents)
+      .where(eq(hostStudents.active, true))
+      .orderBy(asc(hostStudents.fullName));
+    const hostIds = hostRows.map((h) => h.id);
 
-  const days = await db
-    .select()
-    .from(hostScheduleDays)
-    .where(eq(hostScheduleDays.date, date));
-  const dayByHost = new Map(days.map((d) => [d.hostStudentId, d]));
-  const blocks = days.length
-    ? await db
+    let hostInterestRows: (typeof hostStudentInterests.$inferSelect)[];
+    [hostInterestRows, interestRows] = await Promise.all([
+      hostIds.length
+        ? db
+            .select()
+            .from(hostStudentInterests)
+            .where(inArray(hostStudentInterests.hostStudentId, hostIds))
+        : Promise.resolve([]),
+      db
         .select()
-        .from(hostScheduleBlocks)
-        .where(inArray(hostScheduleBlocks.scheduleDayId, days.map((d) => d.id)))
-    : [];
+        .from(interests)
+        .where(eq(interests.active, true))
+        .orderBy(asc(interests.category), asc(interests.name)),
+    ]);
+    interestIdsByHost = new Map<string, string[]>();
+    for (const hi of hostInterestRows) {
+      const list = interestIdsByHost.get(hi.hostStudentId) ?? [];
+      list.push(hi.interestId);
+      interestIdsByHost.set(hi.hostStudentId, list);
+    }
 
-  const lastUpdated = days.length
-    ? days
-        .map((d) => d.createdAt)
-        .sort((a, b) => b.getTime() - a.getTime())[0]
-    : null;
+    const days = await db
+      .select()
+      .from(hostScheduleDays)
+      .where(eq(hostScheduleDays.date, date));
+    dayByHost = new Map(days.map((d) => [d.hostStudentId, d]));
+    blocks = days.length
+      ? await db
+          .select()
+          .from(hostScheduleBlocks)
+          .where(inArray(hostScheduleBlocks.scheduleDayId, days.map((d) => d.id)))
+      : [];
+
+    lastUpdated = days.length
+      ? days
+          .map((d) => d.createdAt)
+          .sort((a, b) => b.getTime() - a.getTime())[0]
+      : null;
+  } catch (err) {
+    console.error("SchedulesPage: failed to load data", err);
+    return <PageLoadError />;
+  }
 
   // Plain, serializable data for the client comparison component.
   const hostsData: HostData[] = hostRows.map((h) => {

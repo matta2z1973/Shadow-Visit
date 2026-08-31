@@ -8,6 +8,7 @@ import {
   blocksFreeBusy,
   type BlockFreeBusy,
 } from "@/lib/ics-parse";
+import PageLoadError from "@/components/page-load-error";
 
 export const dynamic = "force-dynamic";
 
@@ -25,11 +26,17 @@ export default async function AvailabilityPage({
   // Default to a neutral upcoming weekday if none given.
   const date = dateParam ?? "2026-09-16";
 
-  const withFeeds = await db
-    .select()
-    .from(staff)
-    .where(isNotNull(staff.calendarFeedUrl))
-    .orderBy(asc(staff.kind), asc(staff.fullName));
+  let withFeeds: (typeof staff.$inferSelect)[];
+  try {
+    withFeeds = await db
+      .select()
+      .from(staff)
+      .where(isNotNull(staff.calendarFeedUrl))
+      .orderBy(asc(staff.kind), asc(staff.fullName));
+  } catch (err) {
+    console.error("AvailabilityPage: failed to load data", err);
+    return <PageLoadError />;
+  }
 
   const rows: Row[] = await Promise.all(
     withFeeds.map(async (s): Promise<Row> => {

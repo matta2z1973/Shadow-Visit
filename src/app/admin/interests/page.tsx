@@ -4,6 +4,7 @@ import { interests } from "@/lib/db/schema";
 import { asc } from "drizzle-orm";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import SettingsTabs from "@/components/settings-tabs";
+import PageLoadError from "@/components/page-load-error";
 import {
   addInterest,
   renameInterest,
@@ -96,10 +97,16 @@ function Section({ slug, label, items }: { slug: string; label: string; items: R
 
 export default async function InterestsAdmin() {
   await requireAdmin();
-  const all = await db
-    .select()
-    .from(interests)
-    .orderBy(asc(interests.sortOrder), asc(interests.name));
+  let all: (typeof interests.$inferSelect)[];
+  try {
+    all = await db
+      .select()
+      .from(interests)
+      .orderBy(asc(interests.sortOrder), asc(interests.name));
+  } catch (err) {
+    console.error("InterestsAdmin: failed to load data", err);
+    return <PageLoadError />;
+  }
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-10">

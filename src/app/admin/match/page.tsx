@@ -12,6 +12,7 @@ import { getOpenInterviewSlots } from "@/lib/matching/interview-slots";
 import { confirmMatch, bulkConfirmBest } from "./actions";
 import { INTERVIEW_TIME_BLOCKS } from "@/lib/schedule/interview-blocks";
 import EmailSchedulesButton from "./email-schedules-button";
+import PageLoadError from "@/components/page-load-error";
 
 export const dynamic = "force-dynamic";
 
@@ -37,8 +38,45 @@ export default async function MatchPage({
   await requireAdmin();
   const { date: dateParam } = await searchParams;
 
-  const dates = await getShadowDates();
-  const date = dateParam ?? dates[0];
+  let dates: string[];
+  let date: string | undefined;
+  let data!: MatchData;
+  let admissionsStaff: (typeof staff.$inferSelect)[];
+  let matchByProspective: Map<string, typeof matches.$inferSelect>;
+  let openSlotsByProspective: Map<string, Awaited<ReturnType<typeof getOpenInterviewSlots>>>;
+  try {
+    dates = await getShadowDates();
+    date = dateParam ?? dates[0];
+
+    if (date) {
+      data = await getMatchDataForDate(date);
+
+      admissionsStaff = await db
+        .select()
+        .from(staff)
+        .where(eq(staff.kind, "admissions"))
+        .orderBy(asc(staff.fullName));
+
+      const pIds = data.prospectives.map((p) => p.id);
+      const existing = pIds.length
+        ? await db.select().from(matches).where(inArray(matches.prospectiveId, pIds))
+        : [];
+      matchByProspective = new Map(existing.map((m) => [m.prospectiveId, m]));
+
+      // Per-prospective so each one's own already-booked slot stays selectable
+      // when re-confirming (see getOpenInterviewSlots' exclude param).
+      openSlotsByProspective = new Map(
+        await Promise.all(
+          data.prospectives.map(
+            async (p) => [p.id, await getOpenInterviewSlots(date!, p.id)] as const,
+          ),
+        ),
+      );
+    }
+  } catch (err) {
+    console.error("MatchPage: failed to load data", err);
+    return <PageLoadError />;
+  }
 
   if (!date) {
     return (
@@ -56,32 +94,8 @@ export default async function MatchPage({
     );
   }
 
-  const data: MatchData = await getMatchDataForDate(date);
-
-  const admissionsStaff = await db
-    .select()
-    .from(staff)
-    .where(eq(staff.kind, "admissions"))
-    .orderBy(asc(staff.fullName));
-
-  const pIds = data.prospectives.map((p) => p.id);
-  const existing = pIds.length
-    ? await db.select().from(matches).where(inArray(matches.prospectiveId, pIds))
-    : [];
-  const matchByProspective = new Map(existing.map((m) => [m.prospectiveId, m]));
-
-  const hostName = new Map(data.hosts.map((h) => [h.id, h.fullName]));
+  const hostName = new Map(data!.hosts.map((h) => [h.id, h.fullName]));
   const timeBlockLabel = new Map(INTERVIEW_TIME_BLOCKS.map((b) => [b.start, b.label]));
-
-  // Per-prospective so each one's own already-booked slot stays selectable
-  // when re-confirming (see getOpenInterviewSlots' exclude param).
-  const openSlotsByProspective = new Map(
-    await Promise.all(
-      data.prospectives.map(
-        async (p) => [p.id, await getOpenInterviewSlots(date, p.id)] as const,
-      ),
-    ),
-  );
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10">

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { importBatches } from "@/lib/db/schema";
 import { desc } from "drizzle-orm";
 import ProspectivesTabs from "@/components/prospectives-tabs";
+import PageLoadError from "@/components/page-load-error";
 import ProspectiveReportUploadForm from "../../uploads/prospective-report-upload-form";
 
 export const dynamic = "force-dynamic";
@@ -12,11 +13,17 @@ const card =
 
 export default async function ProspectivesUploadPage() {
   await requireAdmin();
-  const recent = await db
-    .select()
-    .from(importBatches)
-    .orderBy(desc(importBatches.createdAt))
-    .limit(10);
+  let recent: (typeof importBatches.$inferSelect)[];
+  try {
+    recent = await db
+      .select()
+      .from(importBatches)
+      .orderBy(desc(importBatches.createdAt))
+      .limit(10);
+  } catch (err) {
+    console.error("ProspectivesUploadPage: failed to load data", err);
+    return <PageLoadError />;
+  }
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-10">

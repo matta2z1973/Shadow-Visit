@@ -6,24 +6,34 @@ import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import { getOrCreateHost } from "@/lib/hosts";
 import InterestsForm from "./interests-form";
 import ScheduleLinkForm from "./schedule-link-form";
+import PageLoadError from "@/components/page-load-error";
 
 export const dynamic = "force-dynamic";
 
 export default async function MePage() {
   const user = await requireUser();
-  const host = await getOrCreateHost(user);
 
-  const allInterests = await db
-    .select()
-    .from(interests)
-    .where(eq(interests.active, true))
-    .orderBy(asc(interests.category), asc(interests.sortOrder), asc(interests.name));
+  let host: Awaited<ReturnType<typeof getOrCreateHost>>;
+  let allInterests: (typeof interests.$inferSelect)[];
+  let selectedIds: string[];
+  try {
+    host = await getOrCreateHost(user);
 
-  const selected = await db
-    .select({ interestId: hostStudentInterests.interestId })
-    .from(hostStudentInterests)
-    .where(eq(hostStudentInterests.hostStudentId, host.id));
-  const selectedIds = selected.map((s) => s.interestId);
+    allInterests = await db
+      .select()
+      .from(interests)
+      .where(eq(interests.active, true))
+      .orderBy(asc(interests.category), asc(interests.sortOrder), asc(interests.name));
+
+    const selected = await db
+      .select({ interestId: hostStudentInterests.interestId })
+      .from(hostStudentInterests)
+      .where(eq(hostStudentInterests.hostStudentId, host.id));
+    selectedIds = selected.map((s) => s.interestId);
+  } catch (err) {
+    console.error("MePage: failed to load data", err);
+    return <PageLoadError />;
+  }
 
   const groups = INTEREST_CATEGORIES.map((c) => ({
     label: c.label,

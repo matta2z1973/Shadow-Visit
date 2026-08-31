@@ -8,6 +8,7 @@ import {
   interests,
 } from "@/lib/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
+import PageLoadError from "@/components/page-load-error";
 
 export const dynamic = "force-dynamic";
 
@@ -17,23 +18,33 @@ const card =
 export default async function AdminDashboard() {
   await requireAdmin();
 
-  const [[hostCount], [prospCount], [interestCount], [openFlagCount]] =
-    await Promise.all([
-      db.select({ n: sql<number>`count(*)::int` }).from(hostStudents),
-      db.select({ n: sql<number>`count(*)::int` }).from(prospectiveStudents),
-      db.select({ n: sql<number>`count(*)::int` }).from(interests),
-      db
-        .select({ n: sql<number>`count(*)::int` })
-        .from(matchFlags)
-        .where(eq(matchFlags.resolved, false)),
-    ]);
+  let hostCount: { n: number };
+  let prospCount: { n: number };
+  let interestCount: { n: number };
+  let openFlagCount: { n: number };
+  let recentFlags: (typeof matchFlags.$inferSelect)[];
+  try {
+    [[hostCount], [prospCount], [interestCount], [openFlagCount]] =
+      await Promise.all([
+        db.select({ n: sql<number>`count(*)::int` }).from(hostStudents),
+        db.select({ n: sql<number>`count(*)::int` }).from(prospectiveStudents),
+        db.select({ n: sql<number>`count(*)::int` }).from(interests),
+        db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(matchFlags)
+          .where(eq(matchFlags.resolved, false)),
+      ]);
 
-  const recentFlags = await db
-    .select()
-    .from(matchFlags)
-    .where(eq(matchFlags.resolved, false))
-    .orderBy(desc(matchFlags.createdAt))
-    .limit(10);
+    recentFlags = await db
+      .select()
+      .from(matchFlags)
+      .where(eq(matchFlags.resolved, false))
+      .orderBy(desc(matchFlags.createdAt))
+      .limit(10);
+  } catch (err) {
+    console.error("AdminDashboard: failed to load data", err);
+    return <PageLoadError />;
+  }
 
   const stats = [
     { label: "Host students", value: hostCount.n, href: "/admin/hosts" },

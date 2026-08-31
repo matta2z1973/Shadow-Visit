@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth";
 import { getMatchDetail } from "@/lib/matching/match-detail";
 import { fmtTime } from "@/lib/schedule/day-timeline";
 import PrintButton from "@/components/print-button";
+import PageLoadError from "@/components/page-load-error";
 import EmailScheduleButton from "./email-button";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +33,13 @@ export default async function SchedulePrint({
 }) {
   await requireAdmin();
   const { matchId } = await params;
-  const detail = await getMatchDetail(matchId);
+  let detail: Awaited<ReturnType<typeof getMatchDetail>>;
+  try {
+    detail = await getMatchDetail(matchId);
+  } catch (err) {
+    console.error("SchedulePrint: failed to load data", err);
+    return <PageLoadError />;
+  }
   if (!detail) notFound();
 
   const { prospective, host, interviewerName, match, timeline } = detail;

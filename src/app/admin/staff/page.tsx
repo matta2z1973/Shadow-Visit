@@ -6,6 +6,7 @@ import { asc, eq } from "drizzle-orm";
 import { categoryLabel, INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import { INTERVIEW_WEEKDAYS, INTERVIEW_TIME_BLOCKS } from "@/lib/schedule/interview-blocks";
 import SettingsTabs from "@/components/settings-tabs";
+import PageLoadError from "@/components/page-load-error";
 import {
   addStaff,
   deleteStaff,
@@ -146,16 +147,25 @@ export default async function StaffAdmin({
   const { tab } = await searchParams;
   const active = tab === "admissions" ? "admissions" : "faculty";
 
-  const [allStaff, allInterests, mappings, availabilityRows] = await Promise.all([
-    db.select().from(staff).orderBy(asc(staff.fullName)),
-    db
-      .select()
-      .from(interests)
-      .where(eq(interests.active, true))
-      .orderBy(asc(interests.category), asc(interests.name)),
-    db.select().from(facultyInterests),
-    db.select().from(interviewerAvailability).orderBy(asc(interviewerAvailability.startDate)),
-  ]);
+  let allStaff: (typeof staff.$inferSelect)[];
+  let allInterests: (typeof interests.$inferSelect)[];
+  let mappings: (typeof facultyInterests.$inferSelect)[];
+  let availabilityRows: (typeof interviewerAvailability.$inferSelect)[];
+  try {
+    [allStaff, allInterests, mappings, availabilityRows] = await Promise.all([
+      db.select().from(staff).orderBy(asc(staff.fullName)),
+      db
+        .select()
+        .from(interests)
+        .where(eq(interests.active, true))
+        .orderBy(asc(interests.category), asc(interests.name)),
+      db.select().from(facultyInterests),
+      db.select().from(interviewerAvailability).orderBy(asc(interviewerAvailability.startDate)),
+    ]);
+  } catch (err) {
+    console.error("StaffAdmin: failed to load data", err);
+    return <PageLoadError />;
+  }
 
   const mapFor = (staffId: string) =>
     new Set(mappings.filter((m) => m.staffId === staffId).map((m) => m.interestId));
