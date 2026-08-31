@@ -21,7 +21,12 @@ export type SyncResult = {
 };
 
 async function fetchIcsDay(icsUrl: string, date: string): Promise<ParsedIcsDay | null> {
-  const res = await fetch(icsUrl, { cache: "no-store" });
+  // Plain fetch() has no default timeout. One slow or unreachable calendar
+  // feed used to hang the entire match page indefinitely (all hosts sync in
+  // parallel, so this was the single biggest source of full-page hangs on
+  // /admin/match — nothing to do with the database). AbortSignal.timeout
+  // turns a stuck feed into a normal caught error instead.
+  const res = await fetch(icsUrl, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`Calendar feed responded ${res.status}`);
   const text = await res.text();
   if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error("Not an iCalendar feed");

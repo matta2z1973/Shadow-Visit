@@ -144,7 +144,9 @@ export function blocksFreeBusy(
 
 // Fetch a feed URL (server-side). Returns parsed busy intervals or throws.
 export async function fetchBusyIntervals(url: string): Promise<BusyInterval[]> {
-  const res = await fetch(url, { cache: "no-store" });
+  // See src/lib/schedule/ics-sync.ts for why this needs an explicit timeout
+  // — plain fetch() has none, and a stuck feed used to hang the whole page.
+  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`Feed responded ${res.status}`);
   const text = await res.text();
   if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error("Not an iCalendar feed");

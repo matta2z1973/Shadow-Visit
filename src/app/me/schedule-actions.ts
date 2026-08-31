@@ -28,7 +28,7 @@ export async function saveMyScheduleLink(
 
   let text: string;
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
     if (!res.ok) {
       return {
         ok: false,
