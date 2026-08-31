@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { after } from "next/server";
 import * as schema from "./schema";
 
 const connectionString = process.env.DATABASE_URL;
@@ -152,16 +153,35 @@ client.unsafe = ((...args: Parameters<typeof originalUnsafe>) => {
     const timeout = new Promise((_, reject) =>
       setTimeout(() => {
         // query.cancel() (see node_modules/postgres/cjs/src/query.js) fires
-        // `this.canceller(this)` — the actual cancel-request promise — but
-        // then discards it via a comma expression and returns null/false
-        // instead. There's no way to grab a reference to that inner promise
-        // through the public API to .catch() it ourselves (confirmed: trying
-        // to chain off query.cancel()'s return throws immediately, since
-        // it's not a promise). Any rejection from that inner promise is a
-        // stray one exactly like the postgres-js socket-internals rejections
-        // this file's global unhandledRejection net (src/instrumentation.ts)
-        // already exists to contain — nothing further to do here.
-        query.cancel();
+        // `this.canceller(this)` — the actual cancel-request promise, which
+        // opens a side connection and sends a real PostgreSQL CancelRequest
+        // — but then discards that promise via a comma expression and
+        // returns null/false instead of it. Verified in isolation (a local,
+        // long-running script against this same database) that calling
+        // cancel() this way does free the connection. But in production,
+        // pg_stat_activity kept showing these exact queries still "active"
+        // a minute-plus after their 20s timeout supposedly cancelled them —
+        // the difference is that a Vercel serverless function is free to
+        // freeze its execution environment the instant our response is
+        // sent, which can cut the cancel's own fire-and-forget network
+        // round trip off mid-flight before it ever reaches Postgres. A
+        // local script has no such deadline, which is why the isolated
+        // test looked fine.
+        //
+        // Fix: grab the real promise ourselves (query.canceller is the same
+        // function `cancel()` calls, just not exposed by the public method)
+        // and hand it to Next's after() — after() keeps this function alive
+        // just long enough for that promise to settle, without delaying the
+        // response the way actually awaiting it here would.
+        try {
+          const canceller = (query as unknown as { canceller: ((q: unknown) => Promise<unknown>) | null }).canceller;
+          if (canceller) {
+            (query as unknown as { canceller: unknown }).canceller = null;
+            after(() => canceller(query).catch(() => {}));
+          }
+        } catch (cancelErr) {
+          console.error("client.unsafe timeout: failed to schedule query cancellation", cancelErr);
+        }
         reject(new Error(`Query timed out after ${QUERY_TIMEOUT_MS}ms (client-side)`));
       }, QUERY_TIMEOUT_MS),
     );
