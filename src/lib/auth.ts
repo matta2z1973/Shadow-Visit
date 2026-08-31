@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -23,7 +24,16 @@ export type AppUser = {
   actualRole: "student" | "admin";
 };
 
-export async function getCurrentUser(): Promise<AppUser | null> {
+// Every page calls this at least twice per request — once via the shared
+// nav layout (to render the header) and again via its own requireUser()/
+// requireAdmin() call — each a fully independent round trip to Supabase's
+// Auth API plus a DB lookup. On a database connection that's only
+// intermittently reliable, two chances to hit that flakiness on every
+// single page load meaningfully compounds the failure rate. React's
+// cache() memoizes this per-request (all calls with these — zero —
+// arguments within the same render return the same promise), so it only
+// actually runs once no matter how many places in the tree call it.
+export const getCurrentUser = cache(async (): Promise<AppUser | null> => {
   const supabase = await createSupabaseServerClient();
 
   let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"];
@@ -81,7 +91,7 @@ export async function getCurrentUser(): Promise<AppUser | null> {
     role,
     actualRole: profile.role,
   };
-}
+});
 
 export async function requireUser(): Promise<AppUser> {
   const user = await getCurrentUser();
