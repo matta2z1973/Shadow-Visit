@@ -1,8 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";
+import { newRequestId, timed } from "@/lib/debug-timing";
 
 export async function updateSupabaseSession(request: NextRequest) {
+  const reqId = newRequestId();
+  console.log(`[debug ${reqId}] middleware: ${request.nextUrl.pathname}`);
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -36,7 +39,7 @@ export async function updateSupabaseSession(request: NextRequest) {
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error("auth.getUser() timed out")), 10_000),
     );
-    await Promise.race([supabase.auth.getUser(), timeout]);
+    await timed(reqId, "middleware auth.getUser", Promise.race([supabase.auth.getUser(), timeout]));
   } catch (err) {
     console.error("updateSupabaseSession: auth.getUser() failed", err);
   }

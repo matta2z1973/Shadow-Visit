@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
 import { profiles } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { newRequestId, timed } from "@/lib/debug-timing";
 
 // Lets an admin preview the student portal without changing their real
 // permissions. Only ever downgrades the *displayed* role for admins — a
@@ -34,6 +35,7 @@ export type AppUser = {
 // arguments within the same render return the same promise), so it only
 // actually runs once no matter how many places in the tree call it.
 export const getCurrentUser = cache(async (): Promise<AppUser | null> => {
+  const reqId = newRequestId();
   const supabase = await createSupabaseServerClient();
 
   let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"];
@@ -48,7 +50,11 @@ export const getCurrentUser = cache(async (): Promise<AppUser | null> => {
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error("auth.getUser() timed out")), 10_000),
     );
-    const result = await Promise.race([supabase.auth.getUser(), timeout]);
+    const result = await timed(
+      reqId,
+      "getCurrentUser auth.getUser",
+      Promise.race([supabase.auth.getUser(), timeout]),
+    );
     user = result.data.user;
   } catch (err) {
     console.error("getCurrentUser: auth.getUser() failed", err);
@@ -58,11 +64,11 @@ export const getCurrentUser = cache(async (): Promise<AppUser | null> => {
 
   let profile: Profile | null;
   try {
-    const [row] = await db
-      .select()
-      .from(profiles)
-      .where(eq(profiles.id, user.id))
-      .limit(1);
+    const [row] = await timed(
+      reqId,
+      "getCurrentUser profile lookup",
+      db.select().from(profiles).where(eq(profiles.id, user.id)).limit(1),
+    );
     profile = row ?? null;
   } catch (err) {
     // A transient DB failure here (e.g. a stalled connection getting

@@ -13,6 +13,7 @@ import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import HostsTabs from "@/components/hosts-tabs";
 import PageLoadError from "@/components/page-load-error";
 import { updateHost, setHostInterests, deleteHost, setHostFeed } from "./actions";
+import { newRequestId, timed } from "@/lib/debug-timing";
 
 export const dynamic = "force-dynamic";
 
@@ -60,26 +61,45 @@ export default async function HostsPage() {
     scheduleCountMap: Map<string, number>;
   };
   let pageData: HostsPageData;
+  const reqId = newRequestId();
+  console.log(`[debug ${reqId}] HostsPage: render started`);
   try {
-    const softCap = await getSoftCap();
+    const softCap = await timed(reqId, "hosts: soft cap", getSoftCap());
     const [hosts, allInterests, hostInterestRows, counts, scheduleCounts] = await Promise.all([
-      db.select().from(hostStudents).orderBy(asc(hostStudents.fullName)),
-      db
-        .select()
-        .from(interests)
-        .where(eq(interests.active, true))
-        .orderBy(asc(interests.category), asc(interests.name)),
-      db.select().from(hostStudentInterests),
-      db
-        .select({ hostStudentId: matches.hostStudentId, n: sql<number>`count(*)::int` })
-        .from(matches)
-        .where(inArray(matches.status, ["confirmed", "sent"]))
-        .groupBy(matches.hostStudentId),
-      db
-        .select({ hostStudentId: hostScheduleDays.hostStudentId, n: sql<number>`count(*)::int` })
-        .from(hostScheduleDays)
-        .groupBy(hostScheduleDays.hostStudentId),
+      timed(
+        reqId,
+        "hosts: host roster",
+        db.select().from(hostStudents).orderBy(asc(hostStudents.fullName)),
+      ),
+      timed(
+        reqId,
+        "hosts: active interests",
+        db
+          .select()
+          .from(interests)
+          .where(eq(interests.active, true))
+          .orderBy(asc(interests.category), asc(interests.name)),
+      ),
+      timed(reqId, "hosts: host-interest links", db.select().from(hostStudentInterests)),
+      timed(
+        reqId,
+        "hosts: visit counts",
+        db
+          .select({ hostStudentId: matches.hostStudentId, n: sql<number>`count(*)::int` })
+          .from(matches)
+          .where(inArray(matches.status, ["confirmed", "sent"]))
+          .groupBy(matches.hostStudentId),
+      ),
+      timed(
+        reqId,
+        "hosts: schedule-day counts",
+        db
+          .select({ hostStudentId: hostScheduleDays.hostStudentId, n: sql<number>`count(*)::int` })
+          .from(hostScheduleDays)
+          .groupBy(hostScheduleDays.hostStudentId),
+      ),
     ]);
+    console.log(`[debug ${reqId}] HostsPage: all queries completed, rendering`);
     pageData = {
       softCap,
       hosts,
@@ -89,7 +109,7 @@ export default async function HostsPage() {
       scheduleCountMap: new Map(scheduleCounts.map((c) => [c.hostStudentId, c.n])),
     };
   } catch (err) {
-    console.error("HostsPage: failed to load data", err);
+    console.error(`[debug ${reqId}] HostsPage: failed to load data`, err);
     return <PageLoadError />;
   }
   const { softCap, hosts, allInterests, hostInterestRows, countMap, scheduleCountMap } = pageData;
