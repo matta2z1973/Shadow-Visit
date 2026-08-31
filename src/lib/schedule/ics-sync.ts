@@ -1,13 +1,19 @@
 // Syncs host students' Outlook ICS feeds into host_schedule_days /
 // host_schedule_blocks for one date. This is the ONLY place that fetches a
 // host's calendar over the network — everything else (schedule comparison,
-// the per-match printable timeline, deriveHostDay in admin/match/actions.ts)
-// reads those tables directly, so those views stay fast and don't depend on
-// Outlook being reachable at view time.
+// the per-match printable timeline, deriveHostDay in admin/match/actions.ts,
+// the matching engine itself) reads those tables directly, so those views
+// stay fast and don't depend on Outlook being reachable at view time.
 //
-// Triggered from two places: automatically whenever matching runs for a date
-// (src/lib/matching/loader.ts), and from the explicit "Refresh schedules"
-// button on the host-schedule comparison tab.
+// Triggered only from the explicit "Refresh schedules" button on the
+// host-schedule comparison tab (src/app/admin/hosts/schedules) — NOT on
+// every /admin/match page load. It used to also run automatically at the top
+// of every match-data load, one host at a time (fetch + up to 4 sequential
+// DB writes each), which multiplied a page load with 15-20 linked hosts into
+// 60-80+ extra database round trips and as many outbound network calls, on
+// every single view. That was the single largest contributor to /admin/match
+// being slow/unreliable — worth remembering if the urge to "just resync
+// inline for freshness" comes back.
 import { db } from "@/lib/db";
 import { hostStudents, hostScheduleDays, hostScheduleBlocks } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -92,6 +98,13 @@ export async function syncHostScheduleDay(
 // saved link are skipped — their (if any) legacy CSV-imported rows are left
 // untouched.
 export async function syncSchedulesForDate(date: string): Promise<SyncResult[]> {
+  // TEMPORARILY DISABLED while diagnosing the Supabase connection-hang issue
+  // (2026-08-31) — the "Refresh schedules" button called this; disabling it
+  // takes every outbound Outlook fetch and its DB writes out of the picture
+  // entirely while we isolate the hang. Remove this early return once access
+  // is stable again.
+  return [];
+  // eslint-disable-next-line no-unreachable
   const hosts = await db
     .select({ id: hostStudents.id, fullName: hostStudents.fullName, icsUrl: hostStudents.icsUrl })
     .from(hostStudents)

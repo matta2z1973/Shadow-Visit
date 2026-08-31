@@ -25,7 +25,6 @@ import {
   type SemanticMatchContext,
 } from "./course-map";
 import { embedTexts, EmbeddingsNotConfiguredError } from "@/lib/llm/embeddings";
-import { syncSchedulesForDate } from "@/lib/schedule/ics-sync";
 
 // Builds the embeddings-based matching context: the course catalog (if any
 // has been uploaded on /admin/settings) plus an embedding per interest,
@@ -35,6 +34,12 @@ import { syncSchedulesForDate } from "@/lib/schedule/ics-sync";
 async function buildSemanticContext(
   interestRows: (typeof interests.$inferSelect)[],
 ): Promise<SemanticMatchContext | undefined> {
+  // TEMPORARILY DISABLED while diagnosing the Supabase connection-hang issue
+  // (2026-08-31) — cuts out the courses-catalog query and any possible
+  // OpenAI embedding call from every /admin/match load, so matching runs on
+  // keyword matching alone. Remove this early return once access is stable
+  // again; nothing else about buildSemanticContext changed.
+  return undefined;
   const catalogRows = await db.select().from(courses);
   if (catalogRows.length === 0) return undefined;
 
@@ -133,7 +138,6 @@ export type MatchData = {
   hosts: HostRow[];
   interestName: Map<string, string>;
   rankings: RankedMatch[];
-  scheduleErrors: { hostName: string; message: string }[];
 };
 
 export async function getMatchDataForDate(date: string): Promise<MatchData> {
@@ -184,14 +188,10 @@ export async function getMatchDataForDate(date: string): Promise<MatchData> {
       })),
   }));
 
-  // --- Sync every calendar-linked host's schedule for this date, then read
-  // it back like any other DB-backed page. This is the only network fetch in
-  // the whole matching flow — everything downstream is a plain DB read.
-  const syncResults = await syncSchedulesForDate(date);
-  const scheduleErrors = syncResults
-    .filter((r) => r.status === "error")
-    .map((r) => ({ hostName: r.hostName, message: r.message ?? "Couldn't read calendar feed." }));
-
+  // Host schedules are a snapshot — populated by the explicit "Refresh
+  // schedules" button on /admin/hosts/schedules (see ics-sync.ts), not
+  // re-fetched from Outlook here. Matching just reads whatever was last
+  // synced, same as every other view built on these tables.
   const dayRows = await db
     .select()
     .from(hostScheduleDays)
@@ -276,5 +276,5 @@ export async function getMatchDataForDate(date: string): Promise<MatchData> {
 
   const rankings = assignBulk(engineProspectives, engineHosts, { hostSoftCap: softCap });
 
-  return { date, softCap, prospectives, hosts, interestName, rankings, scheduleErrors };
+  return { date, softCap, prospectives, hosts, interestName, rankings };
 }

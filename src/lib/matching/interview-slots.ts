@@ -26,28 +26,36 @@ function addMinutes(hhmm: string, mins: number): string {
 }
 
 // Fixed interview slots open on a given shadow date, built from each
-// interviewer's availability templates minus what's already booked that day.
-// Excludes a prospective's own existing booking so re-confirming their match
-// doesn't lock them out of the slot they already hold.
-export async function getOpenInterviewSlots(
+// interviewer's availability templates minus what's already booked that day,
+// for every prospective on that date at once.
+//
+// The templates/staff/bookings queries don't vary per prospective — only the
+// "exclude my own existing booking so re-confirming doesn't lock me out of
+// the slot I already hold" step does, and that's just a set-membership check
+// once the bookings are loaded. This used to be a single-prospective function
+// called once per prospective on /admin/match (getOpenInterviewSlots(date,
+// id)), which re-ran the same 3 queries for every prospective on the date —
+// with 8 prospectives that's ~24 near-identical round trips. Loading the
+// shared data once and computing each prospective's list in memory cuts that
+// to a fixed ~4 queries no matter how many prospectives there are.
+export async function getOpenInterviewSlotsByProspective(
   date: string,
-  excludeProspectiveId?: string,
-): Promise<OpenInterviewSlot[]> {
+  prospectiveIds: string[],
+): Promise<Map<string, OpenInterviewSlot[]>> {
   const weekday = isoWeekday(date);
 
-  const [templates, admissionsStaff] = await Promise.all([
+  const [templates, admissionsStaff, dateMatches] = await Promise.all([
     db.select().from(interviewerAvailability),
     db.select().from(staff).where(eq(staff.kind, "admissions")),
+    db
+      .select({ id: matches.id, prospectiveId: matches.prospectiveId })
+      .from(matches)
+      .where(eq(matches.shadowDate, date)),
   ]);
   const staffName = new Map(admissionsStaff.map((s) => [s.id, s.fullName]));
+  const prospectiveIdByMatchId = new Map(dateMatches.map((m) => [m.id, m.prospectiveId]));
 
-  const dateMatches = await db
-    .select({ id: matches.id, prospectiveId: matches.prospectiveId })
-    .from(matches)
-    .where(eq(matches.shadowDate, date));
-  const matchIds = dateMatches
-    .filter((m) => m.prospectiveId !== excludeProspectiveId)
-    .map((m) => m.id);
+  const matchIds = dateMatches.map((m) => m.id);
   const booked = matchIds.length
     ? await db
         .select()
@@ -59,23 +67,44 @@ export async function getOpenInterviewSlots(
           ),
         )
     : [];
-  const bookedKeys = new Set(
-    booked
-      .filter((b) => b.staffId && b.startTime)
-      .map((b) => `${b.staffId}|${b.startTime!.slice(0, 5)}`),
-  );
 
-  const open: OpenInterviewSlot[] = [];
+  // Every slot booked by anyone, plus which prospective (if any) holds each
+  // one — so "booked by someone else" for prospective P is just "booked" set
+  // minus P's own key.
+  const bookedByKey = new Map<string, string | null>(); // key -> prospectiveId
+  for (const b of booked) {
+    if (!b.staffId || !b.startTime) continue;
+    const key = `${b.staffId}|${b.startTime.slice(0, 5)}`;
+    bookedByKey.set(key, prospectiveIdByMatchId.get(b.matchId) ?? null);
+  }
+
+  const slotDefs: (OpenInterviewSlot & { key: string })[] = [];
   for (const t of templates) {
     if (date < t.startDate || date > t.endDate) continue;
     if (!t.weekdays.includes(weekday)) continue;
     const name = staffName.get(t.staffId);
     if (!name) continue;
     for (const start of t.timeBlocks) {
-      if (bookedKeys.has(`${t.staffId}|${start}`)) continue;
-      open.push({ staffId: t.staffId, staffName: name, start, end: addMinutes(start, 30) });
+      slotDefs.push({
+        key: `${t.staffId}|${start}`,
+        staffId: t.staffId,
+        staffName: name,
+        start,
+        end: addMinutes(start, 30),
+      });
     }
   }
-  open.sort((a, b) => a.staffName.localeCompare(b.staffName) || a.start.localeCompare(b.start));
-  return open;
+  slotDefs.sort((a, b) => a.staffName.localeCompare(b.staffName) || a.start.localeCompare(b.start));
+
+  const result = new Map<string, OpenInterviewSlot[]>();
+  for (const prospectiveId of prospectiveIds) {
+    const open = slotDefs
+      .filter((s) => {
+        const holder = bookedByKey.get(s.key);
+        return holder === undefined || holder === prospectiveId;
+      })
+      .map(({ key: _key, ...slot }) => slot);
+    result.set(prospectiveId, open);
+  }
+  return result;
 }

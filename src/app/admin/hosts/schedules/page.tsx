@@ -29,8 +29,7 @@ export default async function SchedulesPage({
   const date = sp.date ?? today();
 
   // Static reads — this tab never talks to Outlook itself. Data here is
-  // whatever was last synced, either automatically (matching ran for this
-  // date) or via the "Refresh schedules" button below.
+  // whatever was last synced via the "Refresh schedules" button below.
   let hostRows: (typeof hostStudents.$inferSelect)[];
   let interestIdsByHost: Map<string, string[]>;
   let interestRows: (typeof interests.$inferSelect)[];
@@ -140,8 +139,8 @@ export default async function SchedulesPage({
             <>Not synced for {date} yet.</>
           )}
           <div className="text-xs text-zinc-500">
-            This tab is a snapshot — it updates automatically when matching
-            runs for a date, or manually with the button.
+            This tab is a snapshot — refresh manually with the button before
+            running matching if calendars may have changed.
           </div>
         </div>
         <RefreshSchedulesForm date={date} />

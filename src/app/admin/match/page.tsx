@@ -8,7 +8,7 @@ import {
   getMatchDataForDate,
   type MatchData,
 } from "@/lib/matching/loader";
-import { getOpenInterviewSlots } from "@/lib/matching/interview-slots";
+import { getOpenInterviewSlotsByProspective } from "@/lib/matching/interview-slots";
 import { confirmMatch, bulkConfirmBest } from "./actions";
 import { INTERVIEW_TIME_BLOCKS } from "@/lib/schedule/interview-blocks";
 import EmailSchedulesButton from "./email-schedules-button";
@@ -43,7 +43,7 @@ export default async function MatchPage({
   let data!: MatchData;
   let admissionsStaff: (typeof staff.$inferSelect)[];
   let matchByProspective: Map<string, typeof matches.$inferSelect>;
-  let openSlotsByProspective: Map<string, Awaited<ReturnType<typeof getOpenInterviewSlots>>>;
+  let openSlotsByProspective: Awaited<ReturnType<typeof getOpenInterviewSlotsByProspective>>;
   try {
     dates = await getShadowDates();
     date = dateParam ?? dates[0];
@@ -63,14 +63,9 @@ export default async function MatchPage({
         : [];
       matchByProspective = new Map(existing.map((m) => [m.prospectiveId, m]));
 
-      // Per-prospective so each one's own already-booked slot stays selectable
-      // when re-confirming (see getOpenInterviewSlots' exclude param).
-      openSlotsByProspective = new Map(
-        await Promise.all(
-          data.prospectives.map(
-            async (p) => [p.id, await getOpenInterviewSlots(date!, p.id)] as const,
-          ),
-        ),
+      openSlotsByProspective = await getOpenInterviewSlotsByProspective(
+        date,
+        data.prospectives.map((p) => p.id),
       );
     }
   } catch (err) {
@@ -120,14 +115,13 @@ export default async function MatchPage({
         </div>
       </div>
 
-      {data.scheduleErrors.length ? (
-        <div className="mt-3 rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900 dark:text-amber-200">
-          Couldn&rsquo;t load {data.scheduleErrors.length} host calendar feed
-          {data.scheduleErrors.length === 1 ? "" : "s"} — they were left out
-          of matching for this date:{" "}
-          {data.scheduleErrors.map((e) => e.hostName).join(", ")}
-        </div>
-      ) : null}
+      <p className="mt-3 text-sm text-zinc-500">
+        Host schedules shown here are a snapshot.{" "}
+        <Link href="/admin/hosts/schedules" prefetch={false} className="underline">
+          Refresh schedules
+        </Link>{" "}
+        before matching if calendars may have changed.
+      </p>
 
       <div className="mt-3 flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
         <span>{data.prospectives.length} prospective(s)</span>
