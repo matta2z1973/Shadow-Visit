@@ -8,6 +8,25 @@ if (!connectionString) {
   throw new Error("DATABASE_URL is not set");
 }
 
+// postgres-js has no built-in parser for pgvector's `vector` type — its OID
+// is assigned dynamically per database when the extension is created, so it
+// can't be hardcoded. Without a registered parser, postgres-js falls back to
+// generic type handling that is catastrophically slow specifically for this
+// type: `select * from interests` (48 rows, one vector(1536) column) took
+// 2+ minutes end to end despite Postgres's own EXPLAIN ANALYZE showing 0.03ms
+// of actual execution — confirmed directly: casting the same column to
+// ::text instead made the identical query return in 559ms. Every page doing
+// a plain `.select()` on `interests`/`courses` (Hosts, Match, Staff,
+// Interests, Settings, Hosts/Schedules) was hitting this on every load —
+// this was the real cause of those pages hanging, not Supabase
+// infrastructure, despite how much that looked like the explanation over
+// the course of tracking it down. Look up the OID once at startup and
+// register a plain JSON pass-through parser so the driver treats it like
+// any other type instead of whatever slow path it falls back to otherwise.
+const bootstrap = postgres(connectionString, { max: 1 });
+const [vectorType] = await bootstrap`select oid from pg_type where typname = 'vector'`;
+await bootstrap.end();
+
 // Serverless (Vercel) functions get frozen between invocations, and a
 // connection that's mid-query when that happens can get stranded — Postgres
 // sees it as "active, waiting on the client" forever, since the frozen
@@ -52,6 +71,16 @@ const client = postgres(connectionString, {
   connection: {
     statement_timeout: 30_000,
   },
+  types: vectorType
+    ? {
+        vector: {
+          to: vectorType.oid as number,
+          from: [vectorType.oid as number],
+          serialize: (x: number[]) => JSON.stringify(x),
+          parse: (x: string) => JSON.parse(x) as number[],
+        },
+      }
+    : undefined,
 });
 
 export const db = drizzle(client, { schema });
