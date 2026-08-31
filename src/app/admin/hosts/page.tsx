@@ -3,7 +3,6 @@ import { db } from "@/lib/db";
 import {
   hostStudents,
   hostStudentInterests,
-  hostScheduleDays,
   matches,
   appSettings,
   interests,
@@ -65,7 +64,7 @@ export default async function HostsPage() {
   console.log(`[debug ${reqId}] HostsPage: render started`);
   try {
     const softCap = await timed(reqId, "hosts: soft cap", getSoftCap());
-    const [hosts, allInterests, hostInterestRows, counts, scheduleCounts] = await Promise.all([
+    const [hosts, allInterests, hostInterestRows, counts] = await Promise.all([
       timed(
         reqId,
         "hosts: host roster",
@@ -90,14 +89,14 @@ export default async function HostsPage() {
           .where(inArray(matches.status, ["confirmed", "sent"]))
           .groupBy(matches.hostStudentId),
       ),
-      timed(
-        reqId,
-        "hosts: schedule-day counts",
-        db
-          .select({ hostStudentId: hostScheduleDays.hostStudentId, n: sql<number>`count(*)::int` })
-          .from(hostScheduleDays)
-          .groupBy(hostScheduleDays.hostStudentId),
-      ),
+      // TEMPORARILY DISABLED while diagnosing the Supabase connection-hang
+      // issue (2026-08-31) — this specific query (a groupBy count against
+      // host_schedule_days) is the one that's been hanging every single
+      // time in debug logs, while every other query on this page completes
+      // in under 50ms. Pulling it out to confirm the rest of the page loads
+      // without it. Only used for the "no calendar link" fallback badge for
+      // legacy CSV-imported hosts — degrading to icsUrl-only in the
+      // meantime is a minor, acceptable loss of accuracy on that badge.
     ]);
     console.log(`[debug ${reqId}] HostsPage: all queries completed, rendering`);
     pageData = {
@@ -106,7 +105,7 @@ export default async function HostsPage() {
       allInterests,
       hostInterestRows,
       countMap: new Map(counts.map((c) => [c.hostStudentId as string, c.n])),
-      scheduleCountMap: new Map(scheduleCounts.map((c) => [c.hostStudentId, c.n])),
+      scheduleCountMap: new Map(),
     };
   } catch (err) {
     console.error(`[debug ${reqId}] HostsPage: failed to load data`, err);
