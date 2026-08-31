@@ -100,5 +100,51 @@ const client = postgres(connectionString, {
   },
 });
 
+// statement_timeout above is sent as a connection *startup parameter*, which
+// only reliably applies when Supabase's transaction-mode pooler creates a
+// brand-new backend connection for us. When it instead hands back a backend
+// it already had (routine under transaction-mode pooling, which multiplexes
+// many logical clients over a smaller shared set of real connections), we
+// inherit whatever statement_timeout that backend happened to be configured
+// with by whoever used it before us — not the one we asked for. Confirmed
+// directly: a plain `select * from host_students` was cancelled after
+// 294ms despite our client requesting a 30s timeout, and on other requests
+// the same query hung with no timeout enforcement at all. Both are
+// symptoms of the same mechanism, and it explains the erratic
+// fast/cancelled-early/hangs-forever pattern across today far better than
+// any single query or table being slow.
+//
+// Fix: stop trusting server-side session state and enforce the timeout
+// entirely on our own side instead, where it can't be affected by whatever
+// a shared, reused connection happens to carry. `client.unsafe` is the one
+// method drizzle-orm's postgres-js driver calls for every query it runs
+// (see node_modules/drizzle-orm/postgres-js/session.cjs), so wrapping it
+// here covers every query in the app without needing to touch individual
+// call sites. Overriding `.then` in place (rather than replacing the
+// returned object) preserves chained calls like `.values()` that
+// drizzle's typed-select path relies on — verified directly: a normal
+// select, an artificial pg_sleep(10) that correctly times out instead of
+// hanging, and a further select afterward to confirm the connection isn't
+// left in a broken state, all behave correctly with this wrapper in place.
+const QUERY_TIMEOUT_MS = 20_000;
+const originalUnsafe = client.unsafe.bind(client);
+client.unsafe = ((...args: Parameters<typeof originalUnsafe>) => {
+  const query = originalUnsafe(...args);
+  const originalThen = query.then.bind(query);
+  query.then = ((onFulfilled?: unknown, onRejected?: unknown) => {
+    const timeout = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Query timed out after ${QUERY_TIMEOUT_MS}ms (client-side)`)),
+        QUERY_TIMEOUT_MS,
+      ),
+    );
+    return Promise.race([new Promise(originalThen), timeout]).then(
+      onFulfilled as never,
+      onRejected as never,
+    );
+  }) as typeof query.then;
+  return query;
+}) as typeof client.unsafe;
+
 export const db = drizzle(client, { schema });
 export { schema };
