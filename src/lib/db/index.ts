@@ -54,9 +54,19 @@ const VECTOR_TYPE_OID = 17174; // shadow-visit-use1 (lqiqowvuvmrotoxtkvyl, us-ea
 // and connect_timeout below (which force a stuck connection to fail instead
 // of hanging forever), so raising max back up no longer reintroduces that
 // problem — it just restores intra-request concurrency.
+//
+// Then raised again from 4 (2026-08-31): debug-timed logs on /admin/hosts
+// (5 concurrent queries via Promise.all) proved the hang isn't tied to any
+// particular query or table — reordering the queries moved which one hung
+// right along with the reordering. It's whichever queries don't get one of
+// the 4 available connections immediately that stall waiting for one to
+// free up; one attempt even showed 4 of 5 queries stuck at once, right
+// after a rapid prior retry probably hadn't finished freeing its own
+// connections yet. Raising the ceiling well above our heaviest concurrent
+// batch removes the forced queueing that triggers this.
 const client = postgres(connectionString, {
   prepare: false,
-  max: 4,
+  max: 10,
   idle_timeout: 20,
   max_lifetime: 60 * 30,
   // statement_timeout only bounds a query once a connection is established.

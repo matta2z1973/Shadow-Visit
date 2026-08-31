@@ -65,14 +65,10 @@ export default async function HostsPage() {
   console.log(`[debug ${reqId}] HostsPage: render started`);
   try {
     const softCap = await timed(reqId, "hosts: soft cap", getSoftCap());
-    // Order deliberately swapped from the original (2026-08-31 diagnostic):
-    // schedule-day counts moved to 1st, visit counts moved to last. With a
-    // connection pool capped at max:4 and 5 queries fired at once here, one
-    // query always has to wait for and reuse a connection freed by one of
-    // the other four. Previously schedule-day counts was last (the one that
-    // always hung) and this page worked once it was removed entirely. If
-    // the hang follows POSITION rather than TABLE, visit counts — now
-    // last — should be the one to hang this time instead.
+    // 5 concurrent queries here used to hang unpredictably whichever one
+    // didn't get one of only 4 pooled connections (see src/lib/db/index.ts
+    // for the max:10 fix and how a reordering test on 2026-08-31 proved it
+    // was a pool-size issue, not any particular query or table).
     const [scheduleCounts, hosts, allInterests, hostInterestRows, counts] = await Promise.all([
       timed(
         reqId,
