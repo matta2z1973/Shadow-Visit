@@ -11,6 +11,7 @@ import {
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import HostsTabs from "@/components/hosts-tabs";
+import PageLoadError from "@/components/page-load-error";
 import { updateHost, setHostInterests, deleteHost, setHostFeed } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -49,28 +50,49 @@ const field =
 
 export default async function HostsPage() {
   await requireAdmin();
-  const softCap = await getSoftCap();
 
-  const [hosts, allInterests, hostInterestRows, counts, scheduleCounts] = await Promise.all([
-    db.select().from(hostStudents).orderBy(asc(hostStudents.fullName)),
-    db
-      .select()
-      .from(interests)
-      .where(eq(interests.active, true))
-      .orderBy(asc(interests.category), asc(interests.name)),
-    db.select().from(hostStudentInterests),
-    db
-      .select({ hostStudentId: matches.hostStudentId, n: sql<number>`count(*)::int` })
-      .from(matches)
-      .where(inArray(matches.status, ["confirmed", "sent"]))
-      .groupBy(matches.hostStudentId),
-    db
-      .select({ hostStudentId: hostScheduleDays.hostStudentId, n: sql<number>`count(*)::int` })
-      .from(hostScheduleDays)
-      .groupBy(hostScheduleDays.hostStudentId),
-  ]);
-  const countMap = new Map(counts.map((c) => [c.hostStudentId, c.n]));
-  const scheduleCountMap = new Map(scheduleCounts.map((c) => [c.hostStudentId, c.n]));
+  type HostsPageData = {
+    softCap: number;
+    hosts: (typeof hostStudents.$inferSelect)[];
+    allInterests: (typeof interests.$inferSelect)[];
+    hostInterestRows: (typeof hostStudentInterests.$inferSelect)[];
+    countMap: Map<string, number>;
+    scheduleCountMap: Map<string, number>;
+  };
+  let pageData: HostsPageData;
+  try {
+    const softCap = await getSoftCap();
+    const [hosts, allInterests, hostInterestRows, counts, scheduleCounts] = await Promise.all([
+      db.select().from(hostStudents).orderBy(asc(hostStudents.fullName)),
+      db
+        .select()
+        .from(interests)
+        .where(eq(interests.active, true))
+        .orderBy(asc(interests.category), asc(interests.name)),
+      db.select().from(hostStudentInterests),
+      db
+        .select({ hostStudentId: matches.hostStudentId, n: sql<number>`count(*)::int` })
+        .from(matches)
+        .where(inArray(matches.status, ["confirmed", "sent"]))
+        .groupBy(matches.hostStudentId),
+      db
+        .select({ hostStudentId: hostScheduleDays.hostStudentId, n: sql<number>`count(*)::int` })
+        .from(hostScheduleDays)
+        .groupBy(hostScheduleDays.hostStudentId),
+    ]);
+    pageData = {
+      softCap,
+      hosts,
+      allInterests,
+      hostInterestRows,
+      countMap: new Map(counts.map((c) => [c.hostStudentId as string, c.n])),
+      scheduleCountMap: new Map(scheduleCounts.map((c) => [c.hostStudentId, c.n])),
+    };
+  } catch (err) {
+    console.error("HostsPage: failed to load data", err);
+    return <PageLoadError />;
+  }
+  const { softCap, hosts, allInterests, hostInterestRows, countMap, scheduleCountMap } = pageData;
 
   // Summary counts by grade (desc) and gender.
   const byGrade = new Map<number, number>();
