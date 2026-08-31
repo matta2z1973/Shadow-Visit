@@ -25,9 +25,25 @@ export type AppUser = {
 
 export async function getCurrentUser(): Promise<AppUser | null> {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"];
+  try {
+    // supabase.auth.getUser() calls out to Supabase's Auth API — a
+    // separate service from our own Postgres pool, with no timeout of its
+    // own. Every DB call in this app is now bounded (statement_timeout,
+    // connect_timeout), but this one wasn't, so it could still hang the
+    // whole request indefinitely before any page-specific code even runs —
+    // which would look like a page-specific bug when it's really this
+    // shared, universal call stalling on an unrelated timing coincidence.
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("auth.getUser() timed out")), 10_000),
+    );
+    const result = await Promise.race([supabase.auth.getUser(), timeout]);
+    user = result.data.user;
+  } catch (err) {
+    console.error("getCurrentUser: auth.getUser() failed", err);
+    return null;
+  }
   if (!user) return null;
 
   let profile: Profile | null;
