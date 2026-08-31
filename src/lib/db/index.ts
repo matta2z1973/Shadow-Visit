@@ -126,6 +126,23 @@ const client = postgres(connectionString, {
 // select, an artificial pg_sleep(10) that correctly times out instead of
 // hanging, and a further select afterward to confirm the connection isn't
 // left in a broken state, all behave correctly with this wrapper in place.
+//
+// IMPORTANT: giving up on the *promise* via Promise.race does not give up on
+// the *connection*. postgres-js's pool (max: 4 above) considers a connection
+// busy until the query it's running actually completes or errors — our race
+// just stops awaiting it, it doesn't touch the connection at all. If the
+// underlying query is truly stuck (the ClientRead-forever state we've seen
+// directly in pg_stat_activity), that connection is gone from the pool of 4
+// permanently. Confirmed live: after Hosts hit this timeout, the *next*
+// unrelated page (the dashboard) started timing out too — the pool was
+// quietly shrinking by one lost connection per timeout until nothing was
+// left to serve any request. postgres-js's Query objects expose a real
+// `.cancel()` (see node_modules/postgres/cjs/src/query.js and the `cancel()`
+// function in index.js) that opens a side connection and sends an actual
+// PostgreSQL CancelRequest for the specific backend running our query —
+// this is what actually frees the original connection back to the pool,
+// rather than merely abandoning it. Fire-and-forget (don't await it here) so
+// a slow/failed cancel can't extend the 20s our own caller already waited.
 const QUERY_TIMEOUT_MS = 20_000;
 const originalUnsafe = client.unsafe.bind(client);
 client.unsafe = ((...args: Parameters<typeof originalUnsafe>) => {
@@ -133,10 +150,20 @@ client.unsafe = ((...args: Parameters<typeof originalUnsafe>) => {
   const originalThen = query.then.bind(query);
   query.then = ((onFulfilled?: unknown, onRejected?: unknown) => {
     const timeout = new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`Query timed out after ${QUERY_TIMEOUT_MS}ms (client-side)`)),
-        QUERY_TIMEOUT_MS,
-      ),
+      setTimeout(() => {
+        // query.cancel() (see node_modules/postgres/cjs/src/query.js) fires
+        // `this.canceller(this)` — the actual cancel-request promise — but
+        // then discards it via a comma expression and returns null/false
+        // instead. There's no way to grab a reference to that inner promise
+        // through the public API to .catch() it ourselves (confirmed: trying
+        // to chain off query.cancel()'s return throws immediately, since
+        // it's not a promise). Any rejection from that inner promise is a
+        // stray one exactly like the postgres-js socket-internals rejections
+        // this file's global unhandledRejection net (src/instrumentation.ts)
+        // already exists to contain — nothing further to do here.
+        query.cancel();
+        reject(new Error(`Query timed out after ${QUERY_TIMEOUT_MS}ms (client-side)`));
+      }, QUERY_TIMEOUT_MS),
     );
     return Promise.race([new Promise(originalThen), timeout]).then(
       onFulfilled as never,
