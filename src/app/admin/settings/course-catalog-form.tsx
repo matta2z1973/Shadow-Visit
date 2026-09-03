@@ -1,9 +1,16 @@
 "use client";
 
 import { useActionState } from "react";
-import { uploadCourseCatalogAction, clearCourseCatalog, type CourseCatalogResult } from "./actions";
+import {
+  uploadCourseCatalogAction,
+  clearCourseCatalog,
+  backfillCourseEmbeddings,
+  type CourseCatalogResult,
+  type BackfillEmbeddingsResult,
+} from "./actions";
 
 const initial: CourseCatalogResult = { ok: false, message: "", courseCount: 0 };
+const backfillInitial: BackfillEmbeddingsResult = { ok: false, message: "" };
 
 export default function CourseCatalogForm({
   currentCount,
@@ -13,6 +20,10 @@ export default function CourseCatalogForm({
   lastUpdated: string | null;
 }) {
   const [state, action, pending] = useActionState(uploadCourseCatalogAction, initial);
+  const [backfillState, backfillAction, backfillPending] = useActionState(
+    backfillCourseEmbeddings,
+    backfillInitial,
+  );
 
   return (
     <div className="mt-4">
@@ -51,6 +62,31 @@ export default function CourseCatalogForm({
         >
           {state.message}
         </p>
+      ) : null}
+
+      {currentCount > 0 ? (
+        <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <p className="text-xs text-zinc-500">
+            Embeds any course still missing one (covers a catalog loaded outside the normal
+            upload flow, e.g. a database migration). A course only needs this once.
+          </p>
+          <form action={backfillAction} className="mt-2">
+            <button
+              type="submit"
+              disabled={backfillPending}
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700"
+            >
+              {backfillPending ? "Embedding…" : "Backfill missing embeddings"}
+            </button>
+          </form>
+          {backfillState.message ? (
+            <p
+              className={`mt-2 text-sm ${backfillState.ok ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400"}`}
+            >
+              {backfillState.message}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {currentCount > 0 ? (

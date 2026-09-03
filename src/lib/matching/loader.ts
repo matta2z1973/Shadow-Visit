@@ -34,12 +34,6 @@ import { embedTexts, EmbeddingsNotConfiguredError } from "@/lib/llm/embeddings";
 async function buildSemanticContext(
   interestRows: (typeof interests.$inferSelect)[],
 ): Promise<SemanticMatchContext | undefined> {
-  // TEMPORARILY DISABLED while diagnosing the Supabase connection-hang issue
-  // (2026-08-31) — cuts out the courses-catalog query and any possible
-  // OpenAI embedding call from every /admin/match load, so matching runs on
-  // keyword matching alone. Remove this early return once access is stable
-  // again; nothing else about buildSemanticContext changed.
-  return undefined;
   const catalogRows = await db.select().from(courses);
   if (catalogRows.length === 0) return undefined;
 

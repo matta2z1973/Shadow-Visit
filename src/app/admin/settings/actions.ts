@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import * as XLSX from "xlsx";
+import { eq, isNull } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { courses, importBatches } from "@/lib/db/schema";
@@ -166,4 +167,46 @@ export async function clearCourseCatalog() {
   await requireAdmin();
   await db.delete(courses);
   revalidatePath("/admin/settings");
+}
+
+export type BackfillEmbeddingsResult = { ok: boolean; message: string };
+
+// One-time repair: courses normally get their embedding computed at upload
+// time (see uploadCourseCatalogAction above), but the current catalog was
+// loaded via a direct database migration that copied title/code/description
+// without ever calling the embeddings API, leaving every row's embedding
+// NULL. Semantic interest-to-course matching silently has nothing to work
+// with until these are backfilled — this computes and stores them the same
+// way a normal upload does, just for whatever's missing one.
+export async function backfillCourseEmbeddings(
+  _prev: BackfillEmbeddingsResult | undefined,
+): Promise<BackfillEmbeddingsResult> {
+  await requireAdmin();
+
+  const missing = await db
+    .select({ id: courses.id, title: courses.title, description: courses.description })
+    .from(courses)
+    .where(isNull(courses.embedding));
+  if (!missing.length) {
+    return { ok: true, message: "Every course already has an embedding." };
+  }
+
+  let embeddings: number[][];
+  try {
+    embeddings = await embedTexts(
+      missing.map((c) => [c.title, c.description].filter(Boolean).join(" — ")),
+    );
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "Embedding failed.",
+    };
+  }
+
+  await Promise.all(
+    missing.map((c, i) => db.update(courses).set({ embedding: embeddings[i] }).where(eq(courses.id, c.id))),
+  );
+
+  revalidatePath("/admin/settings");
+  return { ok: true, message: `Embedded ${missing.length} course(s).` };
 }
