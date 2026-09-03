@@ -98,13 +98,6 @@ export async function syncHostScheduleDay(
 // saved link are skipped — their (if any) legacy CSV-imported rows are left
 // untouched.
 export async function syncSchedulesForDate(date: string): Promise<SyncResult[]> {
-  // TEMPORARILY DISABLED while diagnosing the Supabase connection-hang issue
-  // (2026-08-31) — the "Refresh schedules" button called this; disabling it
-  // takes every outbound Outlook fetch and its DB writes out of the picture
-  // entirely while we isolate the hang. Remove this early return once access
-  // is stable again.
-  return [];
-  // eslint-disable-next-line no-unreachable
   const hosts = await db
     .select({ id: hostStudents.id, fullName: hostStudents.fullName, icsUrl: hostStudents.icsUrl })
     .from(hostStudents)
