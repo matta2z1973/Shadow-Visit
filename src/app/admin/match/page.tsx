@@ -13,6 +13,7 @@ import { confirmMatch, bulkConfirmBest } from "./actions";
 import { INTERVIEW_TIME_BLOCKS } from "@/lib/schedule/interview-blocks";
 import EmailSchedulesButton from "./email-schedules-button";
 import PageLoadError from "@/components/page-load-error";
+import HostPicker, { type HostOption } from "./host-picker";
 
 export const dynamic = "force-dynamic";
 
@@ -123,6 +124,29 @@ export default async function MatchPage({
         before matching if calendars may have changed.
       </p>
 
+      <details className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <summary className="cursor-pointer font-medium">How matching works</summary>
+        <div className="mt-2 space-y-2 text-zinc-600 dark:text-zinc-400">
+          <p>
+            Each prospective lists one{" "}
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+              Academic interest
+            </span>{" "}
+            — the single subject they said they most want to see, weighted highest — plus up to 4
+            ranked extracurricular interests, <strong>#1</strong> (most wanted) through{" "}
+            <strong>#4</strong> (least).
+          </p>
+          <p>
+            A host&rsquo;s score adds points for every one of those interests they cover: more
+            points for a higher-ranked interest, plus a bonus if the prospective would actually sit
+            in that class during the visit (rather than the host just happening to share the
+            interest too). Points are then subtracted for each free period the host has during the
+            visit, and again if the host is already at or over their soft visit cap. Pick a host
+            below to see exactly how its score breaks down.
+          </p>
+        </div>
+      </details>
+
       <div className="mt-3 flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
         <span>{data.prospectives.length} prospective(s)</span>
         <span>{data.hosts.length} host(s) scheduled this date</span>
@@ -182,7 +206,7 @@ export default async function MatchPage({
               <div className="mt-2 flex flex-wrap gap-1">
                 {p.interests.map((i) => (
                   <Chip key={i.interestId} tone={i.priority === 0 ? "amber" : "zinc"}>
-                    {i.priority === 0 ? "Academic: " : `#${i.priority} `}
+                    {i.priority === 0 ? "Academic interest: " : `#${i.priority} `}
                     {i.name}
                   </Chip>
                 ))}
@@ -197,22 +221,27 @@ export default async function MatchPage({
                   <input type="hidden" name="prospectiveId" value={p.id} />
                   <input type="hidden" name="shadowDate" value={date} />
 
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="font-medium">Host</span>
-                    <select
-                      name="hostStudentId"
-                      defaultValue={confirmed?.hostStudentId ?? best?.hostStudentId ?? ""}
-                      className="rounded-md border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
-                    >
-                      {ranking?.ranked.map((h) => (
-                        <option key={h.hostStudentId} value={h.hostStudentId}>
-                          {h.fullName} · score {h.score} · {h.coveredCount}/
-                          {p.interests.length} interests · {h.freePeriodCount} free
-                          {h.overCap ? " · OVER CAP" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <HostPicker
+                    options={(ranking?.ranked ?? []).map(
+                      (h): HostOption => ({
+                        hostStudentId: h.hostStudentId,
+                        fullName: h.fullName,
+                        score: h.score,
+                        freePeriodCount: h.freePeriodCount,
+                        overCap: h.overCap,
+                        coveredCount: h.coveredCount,
+                        totalInterests: p.interests.length,
+                        coverage: h.coverage.map((c) => ({
+                          name: data.interestName.get(c.interestId) ?? "?",
+                          priority: c.priority,
+                          covered: c.covered,
+                          via: c.via,
+                          blockLabel: c.blockLabel,
+                        })),
+                      }),
+                    )}
+                    defaultHostId={confirmed?.hostStudentId ?? best?.hostStudentId ?? ""}
+                  />
 
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="font-medium">Interview slot</span>
