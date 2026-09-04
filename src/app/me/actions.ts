@@ -9,9 +9,9 @@ import { hostStudents, hostStudentInterests } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 const schema = z.object({
-  grade: z.coerce.number().int().min(1).max(12).optional(),
-  gender: z.enum(["M", "F"]).optional(),
-  interestIds: z.array(z.string().uuid()),
+  grade: z.coerce.number().int().min(1).max(12),
+  gender: z.enum(["M", "F"]),
+  interestIds: z.array(z.string().uuid()).min(1),
 });
 
 export type SaveState = { ok: boolean; message: string };
@@ -28,7 +28,10 @@ export async function saveMe(
     interestIds: formData.getAll("interestIds"),
   });
   if (!parsed.success) {
-    return { ok: false, message: "Please check your entries." };
+    return {
+      ok: false,
+      message: "Grade, gender, and at least one interest are required.",
+    };
   }
 
   const [host] = await db
@@ -40,10 +43,11 @@ export async function saveMe(
 
   await db
     .update(hostStudents)
-    .set({ grade: parsed.data.grade ?? null, gender: parsed.data.gender ?? null })
+    .set({ grade: parsed.data.grade, gender: parsed.data.gender })
     .where(eq(hostStudents.id, host.id));
 
-  // Replace the interest set.
+  // Replace the interest set. interestIds is guaranteed non-empty here (schema
+  // requires at least one), but the insert still guards on length for safety.
   await db
     .delete(hostStudentInterests)
     .where(eq(hostStudentInterests.hostStudentId, host.id));

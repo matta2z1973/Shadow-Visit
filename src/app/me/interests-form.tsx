@@ -53,6 +53,12 @@ export default function InterestsForm({
   const [state, action, pending] = useActionState(saveMe, initial);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    const formData = new FormData(e.currentTarget);
+    if (formData.getAll("interestIds").length === 0) {
+      e.preventDefault();
+      window.alert("Please select at least one interest before saving.");
+      return;
+    }
     if (hasSchedule) return;
     const proceed = window.confirm(
       "You haven't added your class schedule link yet. It really helps us match you with visitors " +
@@ -66,18 +72,23 @@ export default function InterestsForm({
     <form action={action} onSubmit={handleSubmit} className="mt-6">
       <div className="flex flex-wrap gap-6">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium">Grade</span>
+          <span className="font-medium">
+            Grade <span className="text-red-600">*</span>
+          </span>
           <input
             name="grade"
             type="number"
             min={1}
             max={12}
+            required
             defaultValue={host.grade ?? ""}
             className="w-24 rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
           />
         </label>
         <div className="flex flex-col gap-1 text-sm">
-          <span className="font-medium">Gender</span>
+          <span className="font-medium">
+            Gender <span className="text-red-600">*</span>
+          </span>
           <div className="flex gap-4 py-2">
             {(["M", "F"] as const).map((g) => (
               <label key={g} className="flex items-center gap-1.5">
@@ -85,6 +96,7 @@ export default function InterestsForm({
                   type="radio"
                   name="gender"
                   value={g}
+                  required
                   defaultChecked={host.gender === g}
                 />
                 <span>{g === "M" ? "Male" : "Female"}</span>
@@ -94,6 +106,9 @@ export default function InterestsForm({
         </div>
       </div>
 
+      <p className="mt-6 text-sm text-zinc-500">
+        Select at least one interest <span className="text-red-600">*</span>
+      </p>
       {groups.map((g) => (
         <CheckGroup
           key={g.label}
