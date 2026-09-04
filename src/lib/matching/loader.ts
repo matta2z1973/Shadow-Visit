@@ -11,7 +11,7 @@ import {
   matches,
   appSettings,
 } from "@/lib/db/schema";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import {
   assignBulk,
   type HostForMatch,
@@ -83,23 +83,6 @@ export async function getSoftCap(): Promise<number> {
   return Number.isFinite(n) ? n : 5;
 }
 
-// Distinct shadow dates among prospectives who want a shadow visit.
-export async function getShadowDates(): Promise<string[]> {
-  const rows = await db
-    .selectDistinct({ date: prospectiveStudents.shadowDate })
-    .from(prospectiveStudents)
-    .where(
-      and(
-        eq(prospectiveStudents.wantsShadow, true),
-        isNotNull(prospectiveStudents.shadowDate),
-      ),
-    );
-  return rows
-    .map((r) => r.date)
-    .filter((d): d is string => !!d)
-    .sort();
-}
-
 export type ProspectiveRow = {
   id: string;
   fullName: string;
@@ -122,6 +105,11 @@ export type HostRow = {
     courseTitle: string | null;
     coveredInterestIds: string[];
   }[];
+  // Whether this host has ever saved a calendar link — a host with none can
+  // still be matched (calendar/class coverage is a bonus, not a
+  // requirement), but the admin needs to know matching couldn't see their
+  // classes for that date. See admin/match's host picker.
+  hasCalendar: boolean;
   currentVisitCount: number;
 };
 
@@ -134,7 +122,21 @@ export type MatchData = {
   rankings: RankedMatch[];
 };
 
-export async function getMatchDataForDate(date: string): Promise<MatchData> {
+// Data shared across every date in a batch run — fetched once regardless of
+// how many dates are being matched, since none of it is date-specific
+// (unlike each host's day-to-day class schedule).
+type SharedMatchContext = {
+  softCap: number;
+  interestRefs: InterestRef[];
+  interestName: Map<string, string>;
+  semantic: SemanticMatchContext | undefined;
+  hostRecords: (typeof hostStudents.$inferSelect)[];
+  hostIds: string[];
+  hostInterestRows: (typeof hostStudentInterests.$inferSelect)[];
+  baselineVisitCounts: Map<string, number>;
+};
+
+async function loadSharedMatchContext(): Promise<SharedMatchContext> {
   const softCap = await getSoftCap();
 
   const allInterests = await db.select().from(interests);
@@ -146,129 +148,186 @@ export async function getMatchDataForDate(date: string): Promise<MatchData> {
   const interestName = new Map(allInterests.map((i) => [i.id, i.name]));
   const semantic = await buildSemanticContext(allInterests);
 
-  // --- Prospectives for this date ---
-  const pRows = await db
-    .select()
-    .from(prospectiveStudents)
-    .where(
-      and(
-        eq(prospectiveStudents.wantsShadow, true),
-        eq(prospectiveStudents.shadowDate, date),
-      ),
-    );
-  const pIds = pRows.map((p) => p.id);
-  const pInterests = pIds.length
-    ? await db
-        .select()
-        .from(prospectiveInterests)
-        .where(inArray(prospectiveInterests.prospectiveId, pIds))
-    : [];
-
-  const prospectives: ProspectiveRow[] = pRows.map((p) => ({
-    id: p.id,
-    fullName: p.fullName,
-    grade: p.grade,
-    gender: p.gender,
-    interviewerStaffId: p.interviewerStaffId,
-    interviewStart: p.interviewStart,
-    interviewEnd: p.interviewEnd,
-    interests: pInterests
-      .filter((pi) => pi.prospectiveId === p.id)
-      .sort((a, b) => a.priority - b.priority)
-      .map((pi) => ({
-        interestId: pi.interestId,
-        name: interestName.get(pi.interestId) ?? "?",
-        priority: pi.priority,
-      })),
-  }));
-
-  // Host schedules are a snapshot — populated by the explicit "Refresh
-  // schedules" button on /admin/hosts/schedules (see ics-sync.ts), not
-  // re-fetched from Outlook here. Matching just reads whatever was last
-  // synced, same as every other view built on these tables.
-  const dayRows = await db
-    .select()
-    .from(hostScheduleDays)
-    .where(eq(hostScheduleDays.date, date));
-  const hostIds = [...new Set(dayRows.map((d) => d.hostStudentId))];
-
-  const hostRecords = hostIds.length
-    ? await db.select().from(hostStudents).where(inArray(hostStudents.id, hostIds))
-    : [];
-  const dayIds = dayRows.map((d) => d.id);
-  const blocks = dayIds.length
-    ? await db
-        .select()
-        .from(hostScheduleBlocks)
-        .where(inArray(hostScheduleBlocks.scheduleDayId, dayIds))
-    : [];
+  // Every active host is a candidate regardless of whether they have a
+  // synced schedule for any given date — a missing calendar just means no
+  // class-coverage bonus for that host, it doesn't disqualify them (see
+  // engine.ts). Previously this list came from host_schedule_days, which
+  // silently dropped any host without a schedule row from matching
+  // entirely.
+  const hostRecords = await db.select().from(hostStudents).where(eq(hostStudents.active, true));
+  const hostIds = hostRecords.map((h) => h.id);
   const hostInterestRows = hostIds.length
-    ? await db
-        .select()
-        .from(hostStudentInterests)
-        .where(inArray(hostStudentInterests.hostStudentId, hostIds))
+    ? await db.select().from(hostStudentInterests).where(inArray(hostStudentInterests.hostStudentId, hostIds))
     : [];
 
-  // Confirmed/sent visit counts per host.
+  // Confirmed/sent visit counts per host — the starting point for the soft
+  // cap and tie-breaker; a batch run over several dates increments this
+  // further per date as it goes (see buildMatchDataForDates).
   const counts = await db
     .select({ hostStudentId: matches.hostStudentId, n: sql<number>`count(*)::int` })
     .from(matches)
     .where(inArray(matches.status, ["confirmed", "sent"]))
     .groupBy(matches.hostStudentId);
-  const countMap = new Map(counts.map((c) => [c.hostStudentId, c.n]));
+  const baselineVisitCounts = new Map(hostRecords.map((h) => [h.id, 0]));
+  for (const c of counts) {
+    if (c.hostStudentId) baselineVisitCounts.set(c.hostStudentId, c.n);
+  }
 
-  const hosts: HostRow[] = hostRecords.map((h) => {
-    const day = dayRows.find((d) => d.hostStudentId === h.id);
-    const dayBlocks = blocks.filter((b) => b.scheduleDayId === day?.id);
-    const academic = dayBlocks
-      .filter((b) => b.isAcademic)
-      .map((b) => ({
-        blockLabel: b.blockLabel,
-        courseTitle: b.courseTitle,
-        coveredInterestIds: courseCoveredInterestIds(
-          b.courseTitle,
-          b.courseCode,
-          interestRefs,
-          semantic,
-        ),
-      }));
-    return {
-      id: h.id,
+  return { softCap, interestRefs, interestName, semantic, hostRecords, hostIds, hostInterestRows, baselineVisitCounts };
+}
+
+// Builds match data for every date in `dates` that actually has a
+// prospective wanting a shadow visit, sharing one fetch of hosts/interests
+// across all of them. Host visit counts carry forward from one date to the
+// next within this same call (in date order) so a multi-day batch run
+// load-balances across the whole range, not just within each day.
+async function buildMatchDataForDates(dates: string[]): Promise<MatchData[]> {
+  if (!dates.length) return [];
+  const ctx = await loadSharedMatchContext();
+
+  const pRows = dates.length
+    ? await db
+        .select()
+        .from(prospectiveStudents)
+        .where(and(eq(prospectiveStudents.wantsShadow, true), inArray(prospectiveStudents.shadowDate, dates)))
+    : [];
+  const pIds = pRows.map((p) => p.id);
+  const pInterests = pIds.length
+    ? await db.select().from(prospectiveInterests).where(inArray(prospectiveInterests.prospectiveId, pIds))
+    : [];
+
+  // Host schedules are a snapshot — populated by the explicit "Refresh
+  // schedules" button on /admin/hosts/schedules (see ics-sync.ts), not
+  // re-fetched from Outlook here. Matching just reads whatever was last
+  // synced, same as every other view built on these tables. Fetched for
+  // every date in the batch at once rather than one query per date.
+  const dayRows = ctx.hostIds.length
+    ? await db
+        .select()
+        .from(hostScheduleDays)
+        .where(and(inArray(hostScheduleDays.hostStudentId, ctx.hostIds), inArray(hostScheduleDays.date, dates)))
+    : [];
+  const dayIds = dayRows.map((d) => d.id);
+  const blocks = dayIds.length
+    ? await db.select().from(hostScheduleBlocks).where(inArray(hostScheduleBlocks.scheduleDayId, dayIds))
+    : [];
+
+  const liveCounts = new Map(ctx.baselineVisitCounts);
+  const results: MatchData[] = [];
+
+  for (const date of dates) {
+    const pRowsForDate = pRows.filter((p) => p.shadowDate === date);
+    if (!pRowsForDate.length) continue;
+
+    const prospectives: ProspectiveRow[] = pRowsForDate.map((p) => ({
+      id: p.id,
+      fullName: p.fullName,
+      grade: p.grade,
+      gender: p.gender,
+      interviewerStaffId: p.interviewerStaffId,
+      interviewStart: p.interviewStart,
+      interviewEnd: p.interviewEnd,
+      interests: pInterests
+        .filter((pi) => pi.prospectiveId === p.id)
+        .sort((a, b) => a.priority - b.priority)
+        .map((pi) => ({
+          interestId: pi.interestId,
+          name: ctx.interestName.get(pi.interestId) ?? "?",
+          priority: pi.priority,
+        })),
+    }));
+
+    const dayRowsForDate = dayRows.filter((d) => d.date === date);
+    const hosts: HostRow[] = ctx.hostRecords.map((h) => {
+      const day = dayRowsForDate.find((d) => d.hostStudentId === h.id);
+      const dayBlocks = blocks.filter((b) => b.scheduleDayId === day?.id);
+      const academic = dayBlocks
+        .filter((b) => b.isAcademic)
+        .map((b) => ({
+          blockLabel: b.blockLabel,
+          courseTitle: b.courseTitle,
+          coveredInterestIds: courseCoveredInterestIds(b.courseTitle, b.courseCode, ctx.interestRefs, ctx.semantic),
+        }));
+      return {
+        id: h.id,
+        fullName: h.fullName,
+        grade: h.grade,
+        gender: h.gender,
+        dayType: (day?.dayType as "green" | "gold" | null) ?? null,
+        academicBlocks: academic,
+        hasCalendar: !!h.icsUrl,
+        currentVisitCount: liveCounts.get(h.id) ?? 0,
+      };
+    });
+
+    const engineProspectives: ProspectiveForMatch[] = prospectives.map((p) => ({
+      prospectiveId: p.id,
+      grade: p.grade,
+      gender: p.gender,
+      interests: p.interests.map((i) => ({ interestId: i.interestId, priority: i.priority })),
+    }));
+    const engineHosts: HostForMatch[] = hosts.map((h) => ({
+      hostStudentId: h.id,
       fullName: h.fullName,
       grade: h.grade,
       gender: h.gender,
-      dayType: (day?.dayType as "green" | "gold" | null) ?? null,
-      academicBlocks: academic,
-      currentVisitCount: countMap.get(h.id) ?? 0,
-    };
-  });
+      interestIds: ctx.hostInterestRows
+        .filter((hi) => hi.hostStudentId === h.id)
+        .map((hi) => hi.interestId),
+      dayType: h.dayType,
+      academicBlocks: h.academicBlocks.map((b) => ({
+        blockLabel: b.blockLabel,
+        courseTitle: b.courseTitle,
+        courseCode: null,
+        coveredInterestIds: b.coveredInterestIds,
+      })),
+      currentVisitCount: h.currentVisitCount,
+    }));
 
-  // --- Run the engine ---
-  const engineProspectives: ProspectiveForMatch[] = prospectives.map((p) => ({
-    prospectiveId: p.id,
-    grade: p.grade,
-    gender: p.gender,
-    interests: p.interests.map((i) => ({ interestId: i.interestId, priority: i.priority })),
-  }));
-  const engineHosts: HostForMatch[] = hosts.map((h) => ({
-    hostStudentId: h.id,
-    fullName: h.fullName,
-    grade: h.grade,
-    gender: h.gender,
-    interestIds: hostInterestRows
-      .filter((hi) => hi.hostStudentId === h.id)
-      .map((hi) => hi.interestId),
-    dayType: h.dayType,
-    academicBlocks: h.academicBlocks.map((b) => ({
-      blockLabel: b.blockLabel,
-      courseTitle: b.courseTitle,
-      courseCode: null,
-      coveredInterestIds: b.coveredInterestIds,
-    })),
-    currentVisitCount: h.currentVisitCount,
-  }));
+    const rankings = assignBulk(engineProspectives, engineHosts, { hostSoftCap: ctx.softCap });
+    for (const r of rankings) {
+      if (r.best) liveCounts.set(r.best.hostStudentId, (liveCounts.get(r.best.hostStudentId) ?? 0) + 1);
+    }
 
-  const rankings = assignBulk(engineProspectives, engineHosts, { hostSoftCap: softCap });
+    results.push({ date, softCap: ctx.softCap, prospectives, hosts, interestName: ctx.interestName, rankings });
+  }
 
-  return { date, softCap, prospectives, hosts, interestName, rankings };
+  return results;
+}
+
+export async function getMatchDataForDate(date: string): Promise<MatchData> {
+  const [data] = await buildMatchDataForDates([date]);
+  if (data) return data;
+  // No prospective wants a shadow visit on this date — still return a valid
+  // (empty) shape rather than throwing.
+  return {
+    date,
+    softCap: await getSoftCap(),
+    prospectives: [],
+    hosts: [],
+    interestName: new Map(),
+    rankings: [],
+  };
+}
+
+// One matching run across every date in [startDate, endDate] that has at
+// least one prospective wanting a shadow visit — the batch-run entry point
+// for /admin/match's date-range picker.
+export async function getMatchDataForDateRange(startDate: string, endDate: string): Promise<MatchData[]> {
+  const rows = await db
+    .selectDistinct({ date: prospectiveStudents.shadowDate })
+    .from(prospectiveStudents)
+    .where(
+      and(
+        eq(prospectiveStudents.wantsShadow, true),
+        isNotNull(prospectiveStudents.shadowDate),
+        gte(prospectiveStudents.shadowDate, startDate),
+        lte(prospectiveStudents.shadowDate, endDate),
+      ),
+    );
+  const dates = rows
+    .map((r) => r.date)
+    .filter((d): d is string => !!d)
+    .sort();
+  return buildMatchDataForDates(dates);
 }

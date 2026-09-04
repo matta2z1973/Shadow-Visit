@@ -54,11 +54,27 @@ export type HostScore = {
   coveredCount: number;
   overCap: boolean;
   flags: { type: string; message: string }[];
+  usedScheduleMatching: boolean; // false for MS — interests-only scoring
 };
 
 // Priority 1 is worth the most. p1=4, p2=3, p3=2, p4=1.
 export function priorityWeight(priority: number): number {
   return Math.max(1, 5 - priority);
+}
+
+// Middle School (grades 5-8) matches on interests only, for now — no class
+// coverage bonus, no free-period penalty. Upper School (9-12) uses the full
+// schedule-aware scoring. This is a single flag specifically so MS schedule
+// matching can be turned back on later without re-deriving this logic: flip
+// MS_SCHEDULE_MATCHING_ENABLED to true (or raise MS_MAX_GRADE) and MS
+// prospectives start scoring class coverage + free periods the same as US.
+const MS_MAX_GRADE = 8;
+const MS_SCHEDULE_MATCHING_ENABLED = false;
+
+export function usesScheduleMatching(grade: number | null): boolean {
+  if (grade === null) return true; // unknown grade — default to full US-style matching
+  if (grade > MS_MAX_GRADE) return true;
+  return MS_SCHEDULE_MATCHING_ENABLED;
 }
 
 // Academic slots the host has no class in, out of the 4 for that day-type.
@@ -74,17 +90,22 @@ export function computeFreePeriods(host: HostForMatch): number {
 function coverInterest(
   host: HostForMatch,
   mi: MatchInterest,
+  useSchedule: boolean,
 ): InterestCoverage {
-  // Prefer coverage by an actual class the prospective would see that day.
-  for (const b of host.academicBlocks) {
-    if (b.coveredInterestIds.includes(mi.interestId)) {
-      return {
-        interestId: mi.interestId,
-        priority: mi.priority,
-        covered: true,
-        via: "host_class",
-        blockLabel: b.blockLabel,
-      };
+  // Prefer coverage by an actual class the prospective would see that day —
+  // skipped entirely for MS, which matches on interests only (see
+  // usesScheduleMatching above).
+  if (useSchedule) {
+    for (const b of host.academicBlocks) {
+      if (b.coveredInterestIds.includes(mi.interestId)) {
+        return {
+          interestId: mi.interestId,
+          priority: mi.priority,
+          covered: true,
+          via: "host_class",
+          blockLabel: b.blockLabel,
+        };
+      }
     }
   }
   // Otherwise, the host simply shares the interest (activities/athletics etc.).
@@ -122,7 +143,8 @@ export function scoreHost(
     if (prospective.gender !== host.gender) return null;
   }
 
-  const coverage = prospective.interests.map((mi) => coverInterest(host, mi));
+  const useSchedule = usesScheduleMatching(prospective.grade);
+  const coverage = prospective.interests.map((mi) => coverInterest(host, mi, useSchedule));
   const coveredCount = coverage.filter((c) => c.covered).length;
 
   let score = 0;
@@ -134,7 +156,7 @@ export function scoreHost(
     score += priorityWeight(c.priority) * 2 + viaBonus;
   }
 
-  const freePeriodCount = computeFreePeriods(host);
+  const freePeriodCount = useSchedule ? computeFreePeriods(host) : 0;
   score -= freePeriodCount * FREE_PERIOD_PENALTY;
 
   const overCap = host.currentVisitCount >= opts.hostSoftCap;
@@ -160,7 +182,9 @@ export function scoreHost(
     if (!c.covered && c.priority <= 2) {
       flags.push({
         type: "uncovered_interest",
-        message: `Priority ${c.priority} interest not covered by host classes — consider a faculty meeting.`,
+        message: useSchedule
+          ? `Priority ${c.priority} interest not covered by host classes — consider a faculty meeting.`
+          : `Priority ${c.priority} interest not shared by this host.`,
       });
     }
   }
@@ -174,6 +198,7 @@ export function scoreHost(
     coveredCount,
     overCap,
     flags,
+    usedScheduleMatching: useSchedule,
   };
 }
 

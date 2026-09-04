@@ -20,6 +20,8 @@ export type HostOption = {
   coveredCount: number;
   totalInterests: number;
   coverage: CoverageDisplay[];
+  hasCalendar: boolean;
+  usedScheduleMatching: boolean;
 };
 
 function priorityLabel(priority: number): string {
@@ -47,49 +49,70 @@ export default function HostPicker({
       >
         {options.map((h) => (
           <option key={h.hostStudentId} value={h.hostStudentId}>
-            {h.fullName} · score {h.score} · {h.coveredCount}/{h.totalInterests} interests · {h.freePeriodCount} free
+            {h.hasCalendar ? "📅" : "🚫📅"} {h.fullName} · score {h.score} · {h.coveredCount}/
+            {h.totalInterests} interests · {h.freePeriodCount} free
             {h.overCap ? " · OVER CAP" : ""}
           </option>
         ))}
       </select>
 
       {selected ? (
-        <div className="mt-1 w-full max-w-sm rounded-md bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
-          <div className="font-medium text-zinc-700 dark:text-zinc-300">
-            Why score {selected.score}:
-          </div>
-          <ul className="mt-1 space-y-0.5">
-            {selected.coverage.map((c) => (
-              <li key={c.name}>
-                {c.covered ? "✓" : "–"} {priorityLabel(c.priority)} ({c.name})
-                {c.covered ? (
-                  c.via === "host_class" ? (
-                    <span className="text-green-700 dark:text-green-400">
-                      {" "}
-                      — sits in their {c.blockLabel} class (+{priorityWeight(c.priority) * 2 + 2})
-                    </span>
-                  ) : (
-                    <span className="text-green-700 dark:text-green-400">
-                      {" "}
-                      — host also lists this interest (+{priorityWeight(c.priority) * 2})
-                    </span>
-                  )
-                ) : (
-                  " — not covered"
-                )}
-              </li>
-            ))}
-            <li>
-              {selected.freePeriodCount} free period{selected.freePeriodCount === 1 ? "" : "s"} during the visit
-              {selected.freePeriodCount > 0 ? (
-                <span className="text-red-700 dark:text-red-400"> (−{selected.freePeriodCount * 3})</span>
-              ) : null}
-            </li>
-            {selected.overCap ? (
-              <li className="text-red-700 dark:text-red-400">Host at/over visit soft cap (−10)</li>
+        <details className="mt-1 w-full max-w-sm rounded-md bg-zinc-50 text-xs text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
+          <summary className="cursor-pointer px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+            Why score {selected.score}?
+          </summary>
+          <div className="px-3 pb-2">
+            <div
+              className={`mb-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${
+                selected.hasCalendar
+                  ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                  : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+              }`}
+            >
+              {selected.hasCalendar ? "📅 Calendar on file" : "🚫📅 No calendar on file"}
+            </div>
+            {!selected.usedScheduleMatching ? (
+              <p className="mb-1.5 text-zinc-500">
+                Middle School matches on interests only — class schedule isn&rsquo;t used for this
+                grade yet.
+              </p>
             ) : null}
-          </ul>
-        </div>
+            <ul className="space-y-0.5">
+              {selected.coverage.map((c) => (
+                <li key={c.name}>
+                  {c.covered ? "✓" : "–"} {priorityLabel(c.priority)} ({c.name})
+                  {c.covered ? (
+                    c.via === "host_class" ? (
+                      <span className="text-green-700 dark:text-green-400">
+                        {" "}
+                        — sits in their {c.blockLabel} class (+{priorityWeight(c.priority) * 2 + 2})
+                      </span>
+                    ) : (
+                      <span className="text-green-700 dark:text-green-400">
+                        {" "}
+                        — host also lists this interest (+{priorityWeight(c.priority) * 2})
+                      </span>
+                    )
+                  ) : (
+                    " — not covered"
+                  )}
+                </li>
+              ))}
+              {selected.usedScheduleMatching ? (
+                <li>
+                  {selected.freePeriodCount} free period{selected.freePeriodCount === 1 ? "" : "s"} during
+                  the visit
+                  {selected.freePeriodCount > 0 ? (
+                    <span className="text-red-700 dark:text-red-400"> (−{selected.freePeriodCount * 3})</span>
+                  ) : null}
+                </li>
+              ) : null}
+              {selected.overCap ? (
+                <li className="text-red-700 dark:text-red-400">Host at/over visit soft cap (−10)</li>
+              ) : null}
+            </ul>
+          </div>
+        </details>
       ) : null}
     </label>
   );

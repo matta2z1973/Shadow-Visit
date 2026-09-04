@@ -145,7 +145,7 @@ export default async function StaffAdmin({
 }) {
   await requireAdmin();
   const { tab } = await searchParams;
-  const active = tab === "admissions" ? "admissions" : "faculty";
+  const active = tab === "faculty" ? "faculty" : "admissions";
 
   let allStaff: (typeof staff.$inferSelect)[];
   let allInterests: (typeof interests.$inferSelect)[];
