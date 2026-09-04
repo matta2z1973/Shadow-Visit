@@ -97,6 +97,13 @@ export const interests = pgTable(
     name: text("name").notNull(),
     category: text("category").notNull(), // one of CATEGORY_SLUGS
     active: boolean("active").notNull().default(true),
+    // Whether a host can self-select this interest (on /me or the admin Hosts
+    // editor) — separate from `active`, which governs every other picker
+    // (prospective interests, faculty interests). Academic subjects like Math
+    // or Spanish stay active for those, but don't make sense as something a
+    // host personally "selects" — their actual class exposure is already
+    // captured via their synced schedule, not a self-declared interest.
+    hostSelectable: boolean("host_selectable").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
     // Cached embedding of the interest name, computed lazily on first use in
     // matching (see src/lib/matching/loader.ts) so repeated match runs don't

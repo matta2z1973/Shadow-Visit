@@ -1,7 +1,7 @@
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { hostStudentInterests, hostScheduleDays, hostScheduleBlocks, interests } from "@/lib/db/schema";
-import { eq, inArray, asc } from "drizzle-orm";
+import { and, eq, inArray, asc } from "drizzle-orm";
 import { getShadowSeason } from "@/lib/schedule/season";
 import { listTestHosts } from "@/lib/schedule/test-hosts";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
@@ -27,7 +27,7 @@ export default async function TestHostsPage() {
       db
         .select()
         .from(interests)
-        .where(eq(interests.active, true))
+        .where(and(eq(interests.active, true), eq(interests.hostSelectable, true)))
         .orderBy(asc(interests.category), asc(interests.name)),
     ]);
 

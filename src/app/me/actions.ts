@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -56,5 +57,5 @@ export async function saveMe(
   }
 
   revalidatePath("/me");
-  return { ok: true, message: "Saved." };
+  redirect("/me/confirmation");
 }

@@ -1,7 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { hostStudentInterests, interests } from "@/lib/db/schema";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import { getOrCreateHost } from "@/lib/hosts";
 import InterestsForm from "./interests-form";
@@ -22,7 +22,7 @@ export default async function MePage() {
     allInterests = await db
       .select()
       .from(interests)
-      .where(eq(interests.active, true))
+      .where(and(eq(interests.active, true), eq(interests.hostSelectable, true)))
       .orderBy(asc(interests.category), asc(interests.sortOrder), asc(interests.name));
 
     const selected = await db
@@ -76,6 +76,7 @@ export default async function MePage() {
           host={{ grade: host.grade, gender: host.gender }}
           groups={groups}
           selectedIds={selectedIds}
+          hasSchedule={!!host.icsUrl}
         />
       </div>
     </main>

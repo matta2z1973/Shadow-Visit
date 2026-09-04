@@ -9,13 +9,14 @@ import {
   addInterest,
   renameInterest,
   toggleInterest,
+  toggleHostSelectable,
   deleteInterest,
   setCategory,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-type Row = { id: string; name: string; active: boolean; category: string };
+type Row = { id: string; name: string; active: boolean; hostSelectable: boolean; category: string };
 
 function CategorySelect({ id, value }: { id: string; value: string }) {
   return (
@@ -61,6 +62,16 @@ function Section({ slug, label, items }: { slug: string; label: string; items: R
               </button>
             </form>
             <CategorySelect id={i.id} value={i.category} />
+            <form action={toggleHostSelectable}>
+              <input type="hidden" name="id" value={i.id} />
+              <button
+                type="submit"
+                title="Whether a host can pick this for themselves on /me or the Hosts editor — separate from disabling it everywhere"
+                className={`text-xs underline-offset-2 hover:underline ${i.hostSelectable ? "text-zinc-500" : "text-amber-600"}`}
+              >
+                {i.hostSelectable ? "host-selectable" : "hidden from hosts"}
+              </button>
+            </form>
             <form action={toggleInterest}>
               <input type="hidden" name="id" value={i.id} />
               <button type="submit" className="text-xs text-zinc-500 underline-offset-2 hover:underline">
@@ -117,7 +128,10 @@ export default async function InterestsAdmin() {
       <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         Organized into four categories. Use &ldquo;move&rdquo; to recategorize an
         interest. Disabled interests stay on past records but can&rsquo;t be newly
-        selected.
+        selected. &ldquo;host-selectable&rdquo; controls whether hosts can pick it for
+        themselves (on /me or the Hosts editor) — click it to hide something like a
+        subject (Math, Spanish) that only makes sense as a prospective&rsquo;s stated
+        interest, not something a host self-selects.
       </p>
       {INTEREST_CATEGORIES.map((c) => (
         <Section

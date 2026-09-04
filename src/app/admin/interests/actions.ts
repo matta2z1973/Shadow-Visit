@@ -68,6 +68,17 @@ export async function toggleInterest(formData: FormData) {
   revalidatePath("/admin/interests");
 }
 
+export async function toggleHostSelectable(formData: FormData) {
+  await requireAdmin();
+  const id = z.string().uuid().safeParse(formData.get("id"));
+  if (!id.success) return;
+  await db
+    .update(interests)
+    .set({ hostSelectable: sql`not ${interests.hostSelectable}` })
+    .where(eq(interests.id, id.data));
+  revalidatePath("/admin/interests");
+}
+
 export async function deleteInterest(formData: FormData) {
   await requireAdmin();
   const id = z.string().uuid().safeParse(formData.get("id"));

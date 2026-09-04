@@ -43,15 +43,27 @@ export default function InterestsForm({
   host,
   groups,
   selectedIds,
+  hasSchedule,
 }: {
   host: { grade: number | null; gender: "M" | "F" | null };
   groups: { label: string; items: Interest[] }[];
   selectedIds: string[];
+  hasSchedule: boolean;
 }) {
   const [state, action, pending] = useActionState(saveMe, initial);
 
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    if (hasSchedule) return;
+    const proceed = window.confirm(
+      "You haven't added your class schedule link yet. It really helps us match you with visitors " +
+        "who share your interests — use the “Help me find this” link above if you're not " +
+        "sure where to find it.\n\nYou can still save now and add it later. Continue without it?",
+    );
+    if (!proceed) e.preventDefault();
+  }
+
   return (
-    <form action={action} className="mt-6">
+    <form action={action} onSubmit={handleSubmit} className="mt-6">
       <div className="flex flex-wrap gap-6">
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">Grade</span>

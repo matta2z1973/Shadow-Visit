@@ -8,7 +8,7 @@ import {
   appSettings,
   interests,
 } from "@/lib/db/schema";
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import HostsTabs from "@/components/hosts-tabs";
 import PageLoadError from "@/components/page-load-error";
@@ -89,7 +89,7 @@ export default async function HostsPage() {
         db
           .select()
           .from(interests)
-          .where(eq(interests.active, true))
+          .where(and(eq(interests.active, true), eq(interests.hostSelectable, true)))
           .orderBy(asc(interests.category), asc(interests.name)),
       ),
       timed(reqId, "hosts: host-interest links", db.select().from(hostStudentInterests)),
