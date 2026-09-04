@@ -49,7 +49,7 @@ export default function HostPicker({
       >
         {options.map((h) => (
           <option key={h.hostStudentId} value={h.hostStudentId}>
-            {h.hasCalendar ? "📅" : "🚫📅"} {h.fullName} · score {h.score} · {h.coveredCount}/
+            {h.hasCalendar ? "📅" : "🚫"} {h.fullName} · score {h.score} · {h.coveredCount}/
             {h.totalInterests} interests · {h.freePeriodCount} free
             {h.overCap ? " · OVER CAP" : ""}
           </option>
@@ -69,7 +69,7 @@ export default function HostPicker({
                   : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
               }`}
             >
-              {selected.hasCalendar ? "📅 Calendar on file" : "🚫📅 No calendar on file"}
+              {selected.hasCalendar ? "📅 Calendar on file" : "🚫 No calendar on file"}
             </div>
             {!selected.usedScheduleMatching ? (
               <p className="mb-1.5 text-zinc-500">

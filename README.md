@@ -6,7 +6,7 @@
 > Update this whenever a key setup fact, decision, or piece of completed work
 > changes — don't let it go stale.
 
-Last updated: 2026-08-27
+Last updated: 2026-09-04
 
 ## What this is
 
@@ -24,6 +24,14 @@ Built on the same stack as the school's coverage-planner app.
   clone*.
 
 ## Current status (as of last update)
+
+> The bullets immediately below are historical (dated 2026-08-26/27) and
+> left as-is rather than rewritten — for the actual current state as of
+> 2026-09-04, see **"How matching works (reference)"** just below this
+> section and **item 15** under "Decisions made / features shipped" (the
+> production incident, its fixes, and everything shipped since). The
+> Supabase project ref mentioned below is also stale — see the corrected
+> note under "Local environment quirks."
 
 - Repo cloned, `npm install` done, TypeScript compiles clean (`npm run
   typecheck`).
@@ -46,6 +54,119 @@ Built on the same stack as the school's coverage-planner app.
   three untracked real-data sample files (see Secrets section).
 - **Deployed to production**: https://shadow-visit-platform.vercel.app,
   auto-redeployed on every push since — see the Deployment section below.
+
+## How matching works (reference)
+
+This section explains the current matching system end to end — what runs
+automatically, what's manual, and what exists in code but is intentionally
+switched off. See `src/lib/matching/engine.ts` (pure scoring logic, no DB
+import, unit-testable in isolation) and `src/lib/matching/loader.ts` (data
+loading + orchestration) for the actual implementation. Built/overhauled
+2026-09-04 — see item 15 below for the full history of how it got here.
+
+### Running a match
+
+`/admin/match` does **not** compute anything on page load. An admin picks a
+date range (defaults to next Monday–Friday) and clicks **Run match**, which
+re-renders the page with `?start=...&end=...` in the URL — that query string
+is what actually triggers `getMatchDataForDateRange()`. Only prospectives
+with a `shadowDate` inside that range are considered; results are grouped
+into one section per date, each with its own Export CSV / Confirm best for
+all / Email schedules controls.
+
+Visit counts (for the soft-cap tie-breaker) carry forward from one date to
+the next *within a single batch run*, in date order — if Monday's run
+assigns a host, Tuesday's run in the *same* batch already sees that
+incremented count, so load balances across the whole range rather than
+resetting each day. Two separate "Run match" clicks (e.g., running Monday
+alone today, then Tuesday alone tomorrow) do **not** share this — each click
+starts from whatever's actually confirmed in the database at that moment.
+
+### Hard constraints vs. scoring
+
+Grade and gender are the only hard constraints — a host never even appears
+as a candidate if either doesn't match the prospective exactly. Everything
+else (interests, class schedule, host load) is a *score*, not a gate.
+
+### Middle School vs. Upper School
+
+Matching branches on the **prospective's grade** (`usesScheduleMatching()`
+in `engine.ts`):
+
+- **Upper School (grades 9-12)**: full scoring — interest coverage via an
+  actual class the prospective would sit in that day (`host_class`, +bonus)
+  or via the host's own self-selected interests (`host_interest`), minus a
+  penalty per free period the host has, minus a penalty if the host is at or
+  over their visit soft cap.
+- **Middle School (grades 5-8)**: interests only. Class-schedule coverage
+  and the free-period penalty are both skipped entirely — an MS
+  prospective's score never depends on any host's classes, only on shared
+  interests.
+
+**This is a dormant feature, not a removed one.** MS schedule-based matching
+used to work identically to US before this split, and can be turned back on
+by flipping one constant — `MS_SCHEDULE_MATCHING_ENABLED` to `true` (or
+raising `MS_MAX_GRADE`) at the top of `engine.ts` — nothing else needs to
+change.
+
+### A missing calendar never blocks a match
+
+A host is a full matching candidate regardless of whether they have a
+calendar link on file. The host list comes from *every active host*, not
+from whoever happens to have synced schedule data for that date — a host
+without a calendar (or one that just hasn't been refreshed for this
+date/season) simply can't earn the "sits in an actual class" scoring bonus;
+they're still fully scored on interests. (This used to be a real bug: the
+host list was built from `host_schedule_days`, so a host with no synced
+schedule was silently excluded from matching entirely, not just docked
+points.)
+
+On `/admin/match`, the host picker shows 📅 next to a host with a calendar
+link saved, or 🚫 for one without, so the admin can tell at a glance whether
+a given score reflects real class coverage or interests alone. Open "Why
+this score?" under any selection for a full breakdown (which interests
+matched, via a class or a shared interest, and the free-period/cap
+deductions) — collapsed by default.
+
+### Calendar sync and the shadow-visit season
+
+Host calendars are **never** fetched live during matching — they're a
+snapshot, populated only by the explicit "Refresh schedules" button on
+`/admin/hosts/schedules`. That button syncs every host's *entire* Outlook
+calendar feed in one request each, then writes every date within the
+current **season** (Settings → Season — an admin-set start/end date range)
+into `host_schedule_days`/`host_schedule_blocks`. Fetching a whole semester
+costs the same one request per host as fetching a single day used to, since
+the ICS feed itself already contains every date it covers — the season is
+just how much of that response actually gets written to the DB.
+
+If no season is set, "Refresh schedules" fails with a message pointing at
+Settings → Season rather than silently guessing a range.
+
+### Host-selectable interests
+
+`interests.active` governs every picker (prospectives, faculty, hosts).
+Independently, `interests.hostSelectable` narrows *only* what a host can
+pick for themselves (on `/me` or the admin Hosts editor). Academic subjects
+(Math, Science, English, History, Latin, Spanish, Chinese) and the generic
+"Technology/Innovation" catch-all stay active — so a prospective can still
+list one as their stated academic interest and matching still works — but
+aren't host-selectable, since a host doesn't meaningfully "self-declare" an
+interest in a subject; their exposure to it comes from their actual class
+schedule instead. Admins can flip `hostSelectable` per interest on
+`/admin/interests`.
+
+### Test hosts
+
+`/admin/settings/test-hosts` lets an admin create/edit a handful of practice
+hosts with a **hand-entered** schedule instead of a real Outlook calendar —
+for trying out matching without needing a real host's calendar link. A test
+host is identified by an `externalId` starting with `TESTHOST-` (no schema
+flag needed) and has all 8 letter-blocks (A-H — both a green-day and a
+gold-day set) defined at once, applied identically to every weekday in the
+season. "Create default test hosts" seeds 4 of them (grades 9-12, mixed
+gender, 7 classes + 1 free block each) with courses picked to keyword-match
+the built-in test prospective data from `scripts/seed-testdata.ts`.
 
 ## Deployment
 
@@ -92,7 +213,12 @@ created 2026-08-25 — first deploy ever for this repo, via `vercel link` +
   "Use IPv4 connection" to get a working connection string. That string uses
   a different host (`aws-<n>-<region>.pooler.supabase.com`) and a different
   username format (`postgres.<project-ref>`, not plain `postgres`).
-- **Supabase project ref**: `lqzjktqpbwrcpgxdovpy` (region `us-west-2`).
+- **Supabase project ref**: `lqiqowvuvmrotoxtkvyl` (name `shadow-visit-use1`,
+  region `us-east-1`) — **migrated here 2026-08-31** from the original
+  `lqzjktqpbwrcpgxdovpy` (`us-west-2`) after prolonged instability on that
+  project; see item 15 below for why. If any doc or stale note still
+  references `lqzjktqpbwrcpgxdovpy`, it's talking about the old project —
+  that ref is no longer in use.
 - **Zod env validation treats an empty-string env var as present-but-invalid**,
   not absent (`src/lib/env.ts`). Optional vars (`SUPABASE_SERVICE_ROLE_KEY`,
   `DATABASE_URL` when unset, etc.) must be omitted or commented out of
@@ -699,28 +825,167 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
     `src/components/site-nav.tsx` — the admin badge and sign-out control
     remain, just not a specific person's name.
 
+15. **Production connection-hang incident, root-caused and fixed; Season +
+    Test Hosts features; matching overhaul (MS/US split, batch date-range
+    runs, calendar-optional candidacy)** (2026-08-31 through 2026-09-04).
+    Long arc, summarized here — see `git log` for the full sequence of
+    individual commits if a specific step needs re-deriving.
+
+    **The incident.** Pages (`/admin/hosts` especially, but eventually every
+    page including `/login`) started hanging or 300s-timing-out
+    intermittently. Root-caused through several real, stacked bugs — not one
+    single fix:
+    - A `postgres-js` client had no registered type parser for pgvector's
+      `vector` column type, which fell back to a catastrophically slow
+      generic path (a query that took Postgres 0.03ms took 2+ minutes
+      end-to-end). Fixed by registering an identity-passthrough parser for
+      the type's OID (Drizzle's own vector column type does its own
+      string↔array conversion, so the postgres-js-level parser just needs to
+      not mangle it).
+    - The original Supabase project (`lqzjktqpbwrcpgxdovpy`, `us-west-2`)
+      itself showed prolonged instability independent of the above — cut
+      over to a new project (`lqiqowvuvmrotoxtkvyl`, `us-east-1`; see the
+      corrected ref note earlier in this file), full schema + data migrated
+      via the Management API's direct-SQL endpoint (which stayed reachable
+      even while the public pooler wasn't).
+    - Supabase's transaction-mode pooler doesn't reliably honor
+      connection-startup settings like `statement_timeout` on a reused
+      backend — confirmed directly (a query cancelled after 294ms despite a
+      30s configured timeout; another identical query hung 300+ seconds with
+      no timeout at all). Fixed by enforcing timeouts entirely client-side in
+      `src/lib/db/index.ts` by wrapping `client.unsafe` (the one method
+      drizzle-orm's postgres-js driver calls for every query).
+    - That client-side timeout alone wasn't enough: abandoning a promise
+      doesn't free the underlying connection back to the pool if the real
+      query is still stuck server-side — confirmed live (one page's hang
+      measurably shrank the pool for every *subsequent, unrelated* request).
+      Fixed by actually calling the query's `.cancel()` (sends a real
+      PostgreSQL `CancelRequest`) when the timeout fires, wired through
+      `next/server`'s `after()` so the cancellation completes even after
+      Vercel's response has already been sent (a bare fire-and-forget call
+      was getting cut off by the serverless function freezing).
+    - The connection pool (`max`) had been sized for 4 concurrent queries;
+      several admin pages (Hosts especially) fired 5+ queries at once via
+      `Promise.all`, so one query always had to wait for a connection freed
+      by another — and *that wait* was what actually hung, not any specific
+      query or table (proven by literally reordering the queries and
+      watching the hang follow the new last-in-line query). Raised to
+      `max: 10`. Also cut Match's query count from 80-100+ per load down to
+      ~15-20 by moving the per-host calendar sync off the render path
+      (already covered — see "Calendar sync" above) and batching the
+      per-prospective interview-slot lookups into one shared query set.
+    - Also fixed along the way: `getCurrentUser()` was running twice per
+      page load (layout + page each calling it) — deduped via React's
+      `cache()`; two unhandled-promise-rejection crash bugs; missing
+      timeouts on `auth.getUser()` and every calendar-feed `fetch()`.
+    - **Everything above is deployed and confirmed working** — Hosts/Match/
+      login all load reliably now. A support ticket was drafted for Supabase
+      but ultimately not needed once the app-side root causes were found.
+
+    **Season + calendar sync rewrite.** Added an admin-configurable
+    **shadow-visit season** (`/admin/settings/season`, stored in
+    `app_settings`) and rewrote calendar sync (`src/lib/schedule/ics-sync.ts`)
+    to fetch each host's whole ICS feed once and write every date in the
+    season range (a ranged delete + two bulk inserts per host) instead of
+    the old one-date-at-a-time loop — see "Calendar sync and the
+    shadow-visit season" above.
+
+    **Test hosts.** New `src/lib/schedule/test-hosts.ts` +
+    `src/lib/schedule/test-course-catalog.ts` + `/admin/settings/test-hosts`
+    — see "Test hosts" above. Went through one redesign mid-session: the
+    first version only gave a test host one day-type (green *or* gold), so
+    half their week was never visible; now every test host has all 8 blocks
+    (both day types) defined at once, with course dropdowns grouped by
+    category (English/Language/Math/Science/History/Arts/Innovation) instead
+    of free text, and the season alternates green/gold by weekday so both
+    halves actually show up over time.
+
+    **AI/semantic interest matching re-enabled + course-catalog backfill.**
+    The connection-hang firefighting temporarily short-circuited
+    `buildSemanticContext()` in `loader.ts` (returning `undefined`
+    unconditionally) to rule out AI calls as a hang cause — confirmed not
+    the cause, then re-enabled. Separately found the *actual* course catalog
+    had 0/238 rows embedded (it was loaded via a direct DB migration during
+    the Supabase cutover above, bypassing the normal upload-and-embed
+    action) — added a **"Backfill missing embeddings"** button on Settings →
+    Course catalog (`admin/settings/actions.ts`'s `backfillCourseEmbeddings`)
+    to fix that as a one-time repair rather than requiring a full
+    catalog re-upload.
+
+    **Host-selectable interests + `/me` confirmation flow.** See "Host-
+    selectable interests" above for the `hostSelectable` flag. Separately,
+    saving interests on `/me` now redirects to `/me/confirmation` (a "you're
+    all set" page with a sign-out button) instead of just showing an inline
+    "Saved." message; if no schedule link is on file yet, saving first shows
+    a non-blocking `confirm()` prompt pointing at the existing "Help me find
+    this" link — the family can still save and add the link later, it's
+    never a hard requirement.
+
+    **Matching overhaul: MS/US split, batch date-range runs,
+    calendar-optional candidacy.** The biggest functional change — see the
+    whole "How matching works" section above for the full explanation.
+    Summary of what changed in `engine.ts`/`loader.ts`/`admin/match/`:
+    - `engine.ts`: grade-gated `usesScheduleMatching()` — MS (5-8) scores
+      interests only, US (9-12) keeps full schedule-aware scoring, behind a
+      single flag so MS schedule matching can come back later without
+      re-deriving anything.
+    - `loader.ts`: host candidacy now comes from *every active host*, not
+      from `host_schedule_days` — a host with no synced calendar is still a
+      candidate, just without the class-coverage bonus. Added
+      `getMatchDataForDateRange()`, sharing one host/interest fetch across
+      every date in a batch and carrying visit counts forward date-to-date.
+    - `admin/match/page.tsx`: replaced the old single-date-from-URL,
+      compute-on-every-load design with a date-range picker (defaults to
+      next Mon-Fri) and an explicit "Run match" button — no computation
+      happens until it's clicked. Results render as one section per date.
+    - `admin/match/host-picker.tsx`: added the 📅/🚫 calendar-status icon per
+      host, and made the "Why this score?" breakdown a collapsed-by-default
+      `<details>` instead of always-open.
+    - Also: the Staff settings page now defaults to the Admissions tab
+      instead of Faculty (`admin/staff/page.tsx`); removed the redundant
+      `hostStudents.gradYear` column (grade already covers it) from schema,
+      every read/write site, and the CSV-import parser's write path (the
+      parser itself still *extracts* grad year from a legacy CSV's own text,
+      it's just never persisted anymore).
+
+    **Calendar-link help guide screenshots.** The Artifact at
+    `https://claude.ai/code/artifact/27730909-9dd0-4697-898b-79fb011c746c`
+    (linked from `/me`'s "Help me find this") had its illustrative diagrams
+    for "Open Settings," "Find Shared calendars," "Publish your calendar,"
+    and "Copy the ICS link" steps replaced with real screenshots (embedded
+    as data URIs, sourced from a local `Screenshots/` folder — **not
+    committed to git**, since two of the images contain a real, readable ICS
+    calendar-subscription URL in the background). Two of the four steps
+    display their screenshot at half size (CSS `max-width`, not a
+    re-exported lower-resolution asset, so it stays crisp).
+
 ## Git status
 
-**Fully committed and pushed to `origin/main`** as of 2026-08-27 — commits
-through `4a3db3b` ("Swap Staff sub-tab order to Admissions, Faculty") and
-`7537b16` ("Add AI-powered matching, interviewer scheduling, nav
-restructure, and real Greenhill branding" — this one includes the temporary
-`/login/bypass` route, committed deliberately per user decision at the time
-since magic-link wasn't yet confirmed working), plus whatever commit follows
-this README update for item 14 above (Resend/Supabase SMTP fix, admin
-bypass removal, admin promotions, header cleanup). Every push since
-`vercel link` connected this repo auto-triggers a production deploy. Note:
-item 14's Resend-domain and Supabase Auth SMTP/rate-limit/redirect-URL
-changes are **remote config, not code** — they took effect immediately via
-the Supabase Management API and don't require a deploy; only the bypass
-removal and header/admin-promotion changes are actual commits. Working tree
-is clean except:
+**Fully committed and pushed to `origin/main`** as of 2026-09-04, through
+commit `8a53341` ("Split MS/US matching, decouple candidacy from calendar
+sync, batch date-range runs") — see item 15 above for everything from
+`ed4a99e` ("Disable Link prefetching across admin...") through `8a53341`,
+roughly 30 commits covering the connection-hang incident/fix, the Season and
+Test Hosts features, the AI-matching re-enable + course-catalog backfill,
+host-selectable interests, the `/me` confirmation flow, and the full
+matching overhaul. Every push since `vercel link` connected this repo
+auto-triggers a production deploy — confirmed still true throughout this
+whole run (each commit above was individually deployed and smoke-tested
+against production, not batched). A few of item 15's changes are **remote
+config/data, not code** and took effect immediately via the Supabase
+Management API without a deploy: the project cutover itself (schema+data
+migration), the course-embeddings backfill (triggered via a UI button,
+which *is* a code path, but the actual embedding computation/writes aren't
+tied to any git commit), and ad-hoc `pg_terminate_backend`/interest-rename
+SQL run directly against the database during diagnosis. Working tree is
+clean except:
 
 ```
 ?? "Test Report-test.xlsx"        (real-looking student data — never commit)
 ?? "host ICS.ics"                 (real-looking student data — never commit)
 ?? "host schedule by block.xls"   (real-looking student data — never commit)
 ?? "PRD Notes.docx"               (unrecognized file, user chose to leave out of git)
+?? "Screenshots/"                 (real ICS calendar URL visible in 2 images — never commit)
 ```
 
 These are deliberately excluded from every commit (staged with
@@ -728,8 +993,12 @@ These are deliberately excluded from every commit (staged with
 them") — the first three are real student PII sitting in plain repo-root
 files, not under the gitignored `/fixtures/` convention. `PRD Notes.docx`
 is unrecognized and the user asked to leave it out until they say otherwise.
-Don't add any of these to git even incidentally (e.g. via a bare
-`git add -A`).
+`Screenshots/` (added 2026-09-04, source images for the calendar-link help
+guide — see item 15) contains a real, readable ICS calendar-subscription
+URL baked into two of the images; that link was surfaced to the user but
+never explicitly cleared for git, so treat it the same as the PII files
+above until told otherwise. Don't add any of these to git even incidentally
+(e.g. via a bare `git add -A`).
 
 Per standing policy, future commits/pushes still need the user's explicit
 ask each time — this one was requested directly.
@@ -775,9 +1044,18 @@ ask each time — this one was requested directly.
 7. Run **Middle School and Upper School as separate operations** — not
    pooled together. Affects hosts, matching, uploads, everywhere division
    shows up. (`SETUP.md`'s pending list already flagged "MS/LS divisions.")
+   **Partially done 2026-09-04** — see item 15/"How matching works" above:
+   the *scoring algorithm* now branches on grade (MS = interests only, US =
+   full schedule-aware scoring), but hosts/uploads/rosters themselves are
+   still one pooled list, not separate MS/US operations end to end.
 8. Need **updated MS and US calendars** — the matching engine's free-period
    rule depends on calendar/schedule data that needs refreshing, per
-   division per item 7.
+   division per item 7. **Related work done 2026-09-04**: the shadow-visit
+   season (Settings → Season) plus the rewritten calendar sync make
+   refreshing a whole semester's worth of calendar data a single click per
+   host — but this item was about the underlying MS/US calendar *content*
+   itself needing an update, which is a data problem, not something this
+   session's code changes resolve on their own.
 9. Add an **AI chat window under the matching screen** (`/admin/match`) to
    discuss what an admin doesn't like about a specific match and how to
    adjust it for the next matching run — feeds back into item 5's priority
@@ -793,7 +1071,10 @@ detail.
   **done 2026-08-27**, see "Decisions made" item 10 above. Requires an admin
   to upload a catalog and set an OpenAI key on `/admin/settings` before it
   activates; keyword matching still runs either way.
-- Emailing the `.ics`/schedule via Resend (only download is wired today).
+- ~~Emailing the `.ics`/schedule via Resend~~ — **done 2026-08-25/27**, see
+  "Decisions made" items 9 and 14 above (send path built, then Resend/SMTP
+  actually wired up end to end). This bullet was stale — left unresolved
+  here long after the work above shipped; noticed and fixed 2026-09-04.
 - Confirming the exact shadow-date PDF field label.
 - Published Outlook free/busy feeds, Blackbaud SKY API, MS Graph.
 
