@@ -20,12 +20,7 @@ export type UploadResult = {
 };
 
 // Match a CSV to an existing host by name, else create one.
-async function upsertHost(
-  firstName: string | null,
-  lastName: string | null,
-  gradYear: number | null,
-  grade: number | null,
-) {
+async function upsertHost(firstName: string | null, lastName: string | null, grade: number | null) {
   const fullName = composeName(firstName, lastName) || "(unknown)";
   const [existing] = await db
     .select()
@@ -33,21 +28,15 @@ async function upsertHost(
     .where(eq(hostStudents.fullName, fullName))
     .limit(1);
   if (existing) {
-    // Backfill grade/gradYear if we learned them from the schedule.
-    if ((grade !== null && existing.grade === null) || (gradYear !== null && existing.gradYear === null)) {
-      await db
-        .update(hostStudents)
-        .set({
-          grade: existing.grade ?? grade,
-          gradYear: existing.gradYear ?? gradYear,
-        })
-        .where(eq(hostStudents.id, existing.id));
+    // Backfill grade if we learned it from the schedule.
+    if (grade !== null && existing.grade === null) {
+      await db.update(hostStudents).set({ grade }).where(eq(hostStudents.id, existing.id));
     }
     return existing.id;
   }
   const [created] = await db
     .insert(hostStudents)
-    .values({ firstName, lastName, fullName, gradYear, grade })
+    .values({ firstName, lastName, fullName, grade })
     .returning({ id: hostStudents.id });
   return created.id;
 }
@@ -86,12 +75,7 @@ export async function uploadHostSchedules(
         continue;
       }
 
-      const hostId = await upsertHost(
-        parsed.firstName,
-        parsed.lastName,
-        parsed.gradYear,
-        parsed.grade,
-      );
+      const hostId = await upsertHost(parsed.firstName, parsed.lastName, parsed.grade);
 
       // Replace any existing schedule for this host+date.
       const existingDay = await db

@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { hostStudents, hostStudentInterests } from "@/lib/db/schema";
 import { getShadowSeason } from "@/lib/schedule/season";
 import { applyTestHostSchedule, createDefaultTestHosts } from "@/lib/schedule/test-hosts";
+import { BLOCK_LETTERS, type TestHostBlockInput } from "@/lib/schedule/test-course-catalog";
 
 export type TestHostActionResult = { ok: boolean; message: string };
 
@@ -30,7 +31,6 @@ const saveSchema = z.object({
   fullName: z.string().trim().min(1, "Name is required."),
   grade: z.coerce.number().int().min(1).max(12),
   gender: z.enum(["M", "F"]),
-  dayType: z.enum(["green", "gold"]),
 });
 
 export async function saveTestHostAction(
@@ -44,7 +44,6 @@ export async function saveTestHostAction(
     fullName: formData.get("fullName"),
     grade: formData.get("grade"),
     gender: formData.get("gender"),
-    dayType: formData.get("dayType"),
   });
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid form submission." };
@@ -55,21 +54,17 @@ export async function saveTestHostAction(
     return { ok: false, message: "Set a shadow visit season first (Settings → Season)." };
   }
 
-  const letters = parsed.data.dayType === "green" ? ["A", "B", "C", "D"] : ["E", "F", "G", "H"];
-  const blocks = letters
-    .map((letter, i) => {
-      const title = String(formData.get(`block${i + 1}Title`) ?? "").trim();
-      if (!title) return null;
-      return { letter, courseTitle: title, isAcademic: formData.get(`block${i + 1}Academic`) === "on" };
-    })
-    .filter((b): b is { letter: string; courseTitle: string; isAcademic: boolean } => b !== null);
+  const blocks: TestHostBlockInput[] = BLOCK_LETTERS.map((letter) => {
+    const raw = String(formData.get(`block${letter}Course`) ?? "").trim();
+    return { letter, courseTitle: raw || null };
+  });
 
   await db
     .update(hostStudents)
     .set({ fullName: parsed.data.fullName, grade: parsed.data.grade, gender: parsed.data.gender })
     .where(eq(hostStudents.id, parsed.data.hostId));
 
-  await applyTestHostSchedule(parsed.data.hostId, parsed.data.dayType, blocks, season);
+  await applyTestHostSchedule(parsed.data.hostId, blocks, season);
 
   const interestIds = formData.getAll("interestIds").filter((v): v is string => typeof v === "string");
   await db.delete(hostStudentInterests).where(eq(hostStudentInterests.hostStudentId, parsed.data.hostId));

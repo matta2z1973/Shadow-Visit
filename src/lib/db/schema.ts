@@ -157,8 +157,7 @@ export const hostStudents = pgTable(
     firstName: text("first_name"),
     lastName: text("last_name"),
     fullName: text("full_name").notNull(), // "First Last" for display
-    gradYear: integer("grad_year"), // e.g. 2028 (the '28 in the export)
-    grade: integer("grade"), // e.g. 11
+    grade: integer("grade"), // e.g. 11 — grad year is redundant with this
     gender: gender("gender"),
     // Personal Outlook/Exchange "Publish a calendar" ICS feed URL — fetched
     // live wherever a schedule is needed (matching, schedule comparison, the

@@ -13,7 +13,6 @@ const updateSchema = z.object({
   firstName: z.string().trim().max(120).optional(),
   lastName: z.string().trim().max(120).optional(),
   grade: z.coerce.number().int().min(1).max(12).optional(),
-  gradYear: z.coerce.number().int().min(2020).max(2040).optional(),
   gender: z.enum(["M", "F"]).optional().or(z.literal("")),
   active: z.coerce.boolean().optional(),
 });
@@ -25,7 +24,6 @@ export async function updateHost(formData: FormData) {
     firstName: formData.get("firstName") || undefined,
     lastName: formData.get("lastName") || undefined,
     grade: formData.get("grade") || undefined,
-    gradYear: formData.get("gradYear") || undefined,
     gender: formData.get("gender") || "",
     active: formData.get("active") === "on",
   });
@@ -39,7 +37,6 @@ export async function updateHost(formData: FormData) {
       lastName: last,
       fullName: composeName(first, last) || "(unknown)",
       grade: parsed.data.grade ?? null,
-      gradYear: parsed.data.gradYear ?? null,
       gender: (parsed.data.gender || null) as "M" | "F" | null,
       active: parsed.data.active ?? false,
     })

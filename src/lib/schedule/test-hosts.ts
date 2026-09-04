@@ -1,7 +1,7 @@
-// Curated default schedules for the built-in "TestHost" practice hosts —
-// entirely manually-entered data (no ICS calendar), meant to reliably
-// produce visible matches for testing without depending on a real Outlook
-// feed. Edited on /admin/settings/test-hosts.
+// Server-side logic for the built-in "TestHost" practice hosts — hosts with
+// a hand-entered schedule instead of a real Outlook calendar, editable on
+// /admin/settings/test-hosts. See test-course-catalog.ts for the curated
+// course list these draw from.
 import { db } from "@/lib/db";
 import {
   hostStudents,
@@ -13,86 +13,29 @@ import {
 import { and, eq, gte, lte, like } from "drizzle-orm";
 import { blockGridFor } from "./us-blocks";
 import { getShadowSeason, saveShadowSeason, type ShadowSeason } from "./season";
+import {
+  BLOCK_LETTERS,
+  dayTypeForLetter,
+  defaultBlocksForGrade,
+  type BlockLetter,
+  type TestHostBlockInput,
+} from "./test-course-catalog";
 
 export const TEST_HOST_PREFIX = "TESTHOST-";
-
-export type TestHostBlockInput = {
-  letter: string; // "A".."H"
-  courseTitle: string;
-  isAcademic: boolean;
-};
 
 export type TestHostDefault = {
   externalId: string;
   fullName: string;
   grade: number;
   gender: "M" | "F";
-  dayType: "green" | "gold";
-  blocks: TestHostBlockInput[];
-  interestNames: string[];
+  interestNames: string[]; // supplementary self-interests, beyond their classes
 };
 
-// Grades/genders span the spread the built-in test prospective data uses
-// (scripts/seed-testdata.ts), and each host's classes are picked to hit real
-// course-catalog keyword matches (src/lib/matching/course-map.ts) for the
-// interests most commonly requested at that grade/gender combo.
 export const DEFAULT_TEST_HOSTS: TestHostDefault[] = [
-  {
-    externalId: `${TEST_HOST_PREFIX}1`,
-    fullName: "TestHost1",
-    grade: 9,
-    gender: "M",
-    dayType: "green",
-    blocks: [
-      { letter: "A", courseTitle: "Chinese II", isAcademic: true },
-      { letter: "B", courseTitle: "Chemistry", isAcademic: true },
-      { letter: "C", courseTitle: "Advanced Algebra II", isAcademic: true },
-      { letter: "D", courseTitle: "Computer Science A", isAcademic: true },
-    ],
-    interestNames: ["Debate/Speech", "Community Service", "Entrepreneurship"],
-  },
-  {
-    externalId: `${TEST_HOST_PREFIX}2`,
-    fullName: "TestHost2",
-    grade: 10,
-    gender: "F",
-    dayType: "gold",
-    blocks: [
-      { letter: "E", courseTitle: "Chemistry", isAcademic: true },
-      { letter: "F", courseTitle: "US History", isAcademic: true },
-      { letter: "G", courseTitle: "English 10", isAcademic: true },
-      { letter: "H", courseTitle: "Advanced Automation", isAcademic: true },
-    ],
-    interestNames: ["Filmmaking", "Entrepreneurship", "Drama/Theater"],
-  },
-  {
-    externalId: `${TEST_HOST_PREFIX}3`,
-    fullName: "TestHost3",
-    grade: 11,
-    gender: "M",
-    dayType: "green",
-    blocks: [
-      { letter: "A", courseTitle: "Latin II", isAcademic: true },
-      { letter: "B", courseTitle: "US History", isAcademic: true },
-      { letter: "C", courseTitle: "Advanced Automation", isAcademic: true },
-      { letter: "D", courseTitle: "Computer Science A", isAcademic: true },
-    ],
-    interestNames: ["Drama/Theater", "Community Service"],
-  },
-  {
-    externalId: `${TEST_HOST_PREFIX}4`,
-    fullName: "TestHost4",
-    grade: 12,
-    gender: "F",
-    dayType: "gold",
-    blocks: [
-      { letter: "E", courseTitle: "Spanish III", isAcademic: true },
-      { letter: "F", courseTitle: "Chinese II", isAcademic: true },
-      { letter: "G", courseTitle: "Computer Science A", isAcademic: true },
-      { letter: "H", courseTitle: "Chamber Orchestra", isAcademic: true },
-    ],
-    interestNames: ["Community Service", "2D/Studio Art"],
-  },
+  { externalId: `${TEST_HOST_PREFIX}1`, fullName: "TestHost1", grade: 9, gender: "M", interestNames: ["Debate/Speech", "Community Service"] },
+  { externalId: `${TEST_HOST_PREFIX}2`, fullName: "TestHost2", grade: 10, gender: "F", interestNames: ["Drama/Theater", "Entrepreneurship"] },
+  { externalId: `${TEST_HOST_PREFIX}3`, fullName: "TestHost3", grade: 11, gender: "M", interestNames: ["Community Service", "Filmmaking"] },
+  { externalId: `${TEST_HOST_PREFIX}4`, fullName: "TestHost4", grade: 12, gender: "F", interestNames: ["2D/Studio Art", "Community Service"] },
 ];
 
 // Used only when creating the default test hosts for the very first time and
@@ -101,21 +44,22 @@ export const DEFAULT_TEST_HOSTS: TestHostDefault[] = [
 // dead end. Admins can change it anytime on Settings → Season.
 const FALLBACK_SEASON: ShadowSeason = { start: "2026-09-01", end: "2027-06-05" };
 
-function timesFor(letter: string, dayType: "green" | "gold"): { start: string; end: string } {
+function timesFor(letter: BlockLetter): { start: string; end: string } {
+  const dayType = dayTypeForLetter(letter);
   const slot = blockGridFor(dayType).find((b) => b.label === letter);
-  return slot
-    ? { start: slot.startTime, end: slot.endTime }
-    : { start: "08:30:00", end: "09:50:00" };
+  return slot ? { start: slot.startTime, end: slot.endTime } : { start: "08:30:00", end: "09:50:00" };
 }
 
-// Applies the same day-type + block list to every weekday in the season,
-// replacing whatever that host had on file in the range. Test hosts don't
-// have a real calendar to sync from, so — unlike real hosts — every day gets
-// an identical schedule rather than whatever a feed happens to contain.
+// Applies an 8-block (A-H) template across the whole season. A real school's
+// green/gold rotation isn't derivable from anything we store for test hosts
+// (no calendar to read it from), so this alternates every weekday in season
+// order starting from green — deterministic and shared by every test host,
+// same as how one real school is on the same rotation for everyone. This is
+// what makes a course sitting on, say, block E actually show up on some
+// dates and not others, instead of every day being identical.
 export async function applyTestHostSchedule(
   hostId: string,
-  dayType: "green" | "gold",
-  blocks: TestHostBlockInput[],
+  blocks: TestHostBlockInput[], // exactly 8, letters A..H
   season: ShadowSeason,
 ): Promise<void> {
   await db
@@ -128,37 +72,57 @@ export async function applyTestHostSchedule(
       ),
     );
 
-  const dates: string[] = [];
+  const byLetter = new Map(blocks.map((b) => [b.letter, b]));
+  const greenBlocks = (["A", "B", "C", "D"] as BlockLetter[])
+    .map((l) => byLetter.get(l))
+    .filter((b): b is TestHostBlockInput => !!b);
+  const goldBlocks = (["E", "F", "G", "H"] as BlockLetter[])
+    .map((l) => byLetter.get(l))
+    .filter((b): b is TestHostBlockInput => !!b);
+
+  const dates: { date: string; dayType: "green" | "gold" }[] = [];
   const cursor = new Date(`${season.start}T00:00:00Z`);
   const end = new Date(`${season.end}T00:00:00Z`);
+  let weekdayIndex = 0;
   while (cursor <= end) {
     const weekday = cursor.getUTCDay(); // 0=Sun..6=Sat
-    if (weekday !== 0 && weekday !== 6) dates.push(cursor.toISOString().slice(0, 10));
+    if (weekday !== 0 && weekday !== 6) {
+      dates.push({
+        date: cursor.toISOString().slice(0, 10),
+        dayType: weekdayIndex % 2 === 0 ? "green" : "gold",
+      });
+      weekdayIndex++;
+    }
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   if (!dates.length) return;
 
   const insertedDays = await db
     .insert(hostScheduleDays)
-    .values(dates.map((date) => ({ hostStudentId: hostId, date, dayType })))
-    .returning({ id: hostScheduleDays.id });
+    .values(dates.map((d) => ({ hostStudentId: hostId, date: d.date, dayType: d.dayType })))
+    .returning({ id: hostScheduleDays.id, date: hostScheduleDays.date });
 
-  const blockRows = insertedDays.flatMap((day) =>
-    blocks.map((b) => {
-      const t = timesFor(b.letter, dayType);
-      return {
-        scheduleDayId: day.id,
-        blockLabel: `${b.letter} Block`,
-        courseTitle: b.courseTitle,
-        courseCode: null,
-        room: "Test Room",
-        teacher: "Test Teacher",
-        isAcademic: b.isAcademic,
-        startTime: t.start,
-        endTime: t.end,
-      };
-    }),
-  );
+  const dayTypeByDate = new Map(dates.map((d) => [d.date, d.dayType]));
+  const blockRows = insertedDays.flatMap((day) => {
+    const dayType = dayTypeByDate.get(day.date)!;
+    const dayBlocks = dayType === "green" ? greenBlocks : goldBlocks;
+    return dayBlocks
+      .filter((b) => b.courseTitle) // a free block gets no row at all
+      .map((b) => {
+        const t = timesFor(b.letter);
+        return {
+          scheduleDayId: day.id,
+          blockLabel: `${b.letter} Block`,
+          courseTitle: b.courseTitle,
+          courseCode: null,
+          room: "Test Room",
+          teacher: "Test Teacher",
+          isAcademic: true,
+          startTime: t.start,
+          endTime: t.end,
+        };
+      });
+  });
   if (blockRows.length) await db.insert(hostScheduleBlocks).values(blockRows);
 }
 
@@ -192,7 +156,7 @@ export async function createDefaultTestHosts(): Promise<{ created: number; seaso
       })
       .returning({ id: hostStudents.id });
 
-    await applyTestHostSchedule(host.id, def.dayType, def.blocks, season);
+    await applyTestHostSchedule(host.id, defaultBlocksForGrade(def.grade), season);
 
     const interestIds = def.interestNames.map((n) => byName.get(n)).filter((x): x is string => !!x);
     if (interestIds.length) {
@@ -214,3 +178,5 @@ export function listTestHosts() {
     .where(like(hostStudents.externalId, `${TEST_HOST_PREFIX}%`))
     .orderBy(hostStudents.externalId);
 }
+
+export { BLOCK_LETTERS };

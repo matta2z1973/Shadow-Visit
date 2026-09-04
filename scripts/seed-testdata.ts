@@ -59,11 +59,6 @@ const ACTIVITY_POOL = [
 const FIRST = ["Ava","Liam","Mia","Noah","Zoe","Kai","Ivy","Eli","Nora","Owen","Aria","Leo","Maya","Jack","Ruby","Finn","Lena","Cole","Tess","Wyatt","Blake","Sana","Omar","Dev","Priya","Marco","Nina","Theo","Lucy","Sam"];
 const LAST = ["Patel","Nguyen","Garcia","Kim","Johnson","Silva","Chen","Brooks","Rivera","Adams","Okafor","Haddad","Reyes","Cohen","Watson","Diaz","Park","Flynn","Ortiz","Bauer"];
 
-function gradYearFor(grade: number): number {
-  // 2026-2027 school year: grade 12 grads 2027, 11 → 2028, etc.
-  return 2027 + (12 - grade);
-}
-
 async function nameMap() {
   const rows = await db.select().from(interests);
   return new Map(rows.map((r) => [r.name, r.id]));
@@ -92,7 +87,6 @@ async function seedHosts(byName: Map<string, string>) {
         lastName,
         fullName: `${firstName} ${lastName}`,
         grade,
-        gradYear: gradYearFor(grade),
         gender,
       })
       .returning({ id: hostStudents.id });

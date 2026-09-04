@@ -1,32 +1,29 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 import { saveTestHostAction, deleteTestHostAction, type TestHostActionResult } from "./actions";
+import { BLOCK_LETTERS, COURSE_CATEGORIES, TEST_COURSE_CATALOG, dayTypeForLetter } from "@/lib/schedule/test-course-catalog";
 
 const initial: TestHostActionResult = { ok: false, message: "" };
 
 type InterestCategory = { slug: string; label: string };
 type Interest = { id: string; name: string; category: string };
-type BlockInfo = { blockLabel: string; courseTitle: string | null; isAcademic: boolean };
 
 export default function TestHostCard({
   host,
-  schedule,
+  courseByLetter,
   selectedInterestIds,
   interestCategories,
   allInterests,
 }: {
   host: { id: string; fullName: string; grade: number | null; gender: "M" | "F" | null };
-  schedule: { dayType: "green" | "gold" | null; blocks: BlockInfo[] } | null;
+  courseByLetter: Record<string, string | null>;
   selectedInterestIds: string[];
   interestCategories: readonly InterestCategory[];
   allInterests: Interest[];
 }) {
   const [state, action, pending] = useActionState(saveTestHostAction, initial);
-  const [dayType, setDayType] = useState<"green" | "gold">(schedule?.dayType ?? "green");
   const selected = new Set(selectedInterestIds);
-  const letters = dayType === "green" ? ["A", "B", "C", "D"] : ["E", "F", "G", "H"];
-  const blocks = [0, 1, 2, 3].map((i) => schedule?.blocks[i] ?? null);
 
   return (
     <details className="rounded-lg border border-zinc-200 dark:border-zinc-800" open>
@@ -67,45 +64,25 @@ export default function TestHostCard({
               <option value="F">F</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-zinc-500">Day type</span>
-            <select
-              name="dayType"
-              value={dayType}
-              onChange={(e) => setDayType(e.target.value as "green" | "gold")}
-              className="rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            >
-              <option value="green">Green (A–D)</option>
-              <option value="gold">Gold (E–H)</option>
-            </select>
-          </label>
         </div>
 
         <div className="mt-3">
           <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
             Classes (applied to every weekday in the season)
           </span>
-          <div className="mt-1 space-y-1.5">
-            {blocks.map((b, i) => (
-              <div key={letters[i]} className="flex items-center gap-2">
-                <span className="w-14 text-xs text-zinc-500">{letters[i]} Block</span>
-                <input
-                  name={`block${i + 1}Title`}
-                  defaultValue={b?.courseTitle ?? ""}
-                  placeholder="Course title"
-                  className="flex-1 rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                />
-                <label className="flex items-center gap-1 text-xs text-zinc-500">
-                  <input
-                    type="checkbox"
-                    name={`block${i + 1}Academic`}
-                    defaultChecked={b?.isAcademic ?? true}
-                    className="h-4 w-4"
-                  />
-                  class
-                </label>
-              </div>
-            ))}
+          <div className="mt-1 grid gap-x-4 gap-y-1.5 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <div className="text-xs font-medium text-zinc-500">Green day</div>
+              {BLOCK_LETTERS.filter((l) => dayTypeForLetter(l) === "green").map((letter) => (
+                <BlockRow key={letter} letter={letter} current={courseByLetter[letter] ?? null} />
+              ))}
+            </div>
+            <div className="space-y-1.5">
+              <div className="text-xs font-medium text-zinc-500">Gold day</div>
+              {BLOCK_LETTERS.filter((l) => dayTypeForLetter(l) === "gold").map((letter) => (
+                <BlockRow key={letter} letter={letter} current={courseByLetter[letter] ?? null} />
+              ))}
+            </div>
           </div>
         </div>
 
@@ -165,5 +142,29 @@ export default function TestHostCard({
         </button>
       </form>
     </details>
+  );
+}
+
+function BlockRow({ letter, current }: { letter: string; current: string | null }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-6 text-xs text-zinc-500">{letter}</span>
+      <select
+        name={`block${letter}Course`}
+        defaultValue={current ?? ""}
+        className="flex-1 rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+      >
+        <option value="">Free block</option>
+        {COURSE_CATEGORIES.map((c) => (
+          <optgroup key={c.slug} label={c.label}>
+            {TEST_COURSE_CATALOG[c.slug].map((title) => (
+              <option key={title} value={title}>
+                {title}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </div>
   );
 }

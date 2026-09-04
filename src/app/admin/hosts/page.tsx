@@ -242,10 +242,6 @@ export default async function HostsPage() {
                       <option value="F">F</option>
                     </select>
                   </label>
-                  <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-zinc-500">Grad year</span>
-                    <input name="gradYear" type="number" min={2020} max={2040} defaultValue={h.gradYear ?? ""} className={`${field} w-20`} />
-                  </label>
                   <label className="flex items-center gap-1.5 pb-1.5 text-xs">
                     <input type="checkbox" name="active" defaultChecked={h.active} className="h-4 w-4" />
                     <span>Active</span>
