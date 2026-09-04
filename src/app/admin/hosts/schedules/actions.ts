@@ -2,20 +2,21 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
-import { syncSchedulesForDate } from "@/lib/schedule/ics-sync";
+import { syncAllHostSchedules } from "@/lib/schedule/ics-sync";
 
 export type RefreshState = { ok: boolean; message: string };
 
-export async function refreshSchedules(
-  _prev: RefreshState | undefined,
-  formData: FormData,
-): Promise<RefreshState> {
+export async function refreshSchedules(): Promise<RefreshState> {
   await requireAdmin();
-  const date = formData.get("date") as string | null;
-  if (!date) return { ok: false, message: "Pick a date first." };
 
-  const results = await syncSchedulesForDate(date);
+  const outcome = await syncAllHostSchedules();
+  if (!outcome.ok) {
+    return { ok: false, message: outcome.message };
+  }
+
+  const { results, season } = outcome;
   const synced = results.filter((r) => r.status === "synced").length;
+  const totalDays = results.reduce((sum, r) => sum + (r.daysSynced ?? 0), 0);
   const errors = results.filter((r) => r.status === "error");
 
   revalidatePath("/admin/hosts/schedules");
@@ -25,7 +26,8 @@ export async function refreshSchedules(
   return {
     ok: true,
     message:
-      `Checked ${results.length} host(s) with a saved calendar link — ${synced} updated for ${date}.` +
+      `Checked ${results.length} host(s) with a saved calendar link across ${season.start} to ${season.end} — ` +
+      `${synced} updated (${totalDays} day(s) total).` +
       (errors.length
         ? ` ${errors.length} failed: ${errors.map((e) => e.hostName).join(", ")}.`
         : ""),

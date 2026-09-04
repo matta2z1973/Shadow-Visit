@@ -139,11 +139,11 @@ export default async function SchedulesPage({
             <>Not synced for {date} yet.</>
           )}
           <div className="text-xs text-zinc-500">
-            This tab is a snapshot — refresh manually with the button before
-            running matching if calendars may have changed.
+            This tab is a snapshot — refresh manually with the button to sync every linked host
+            across the whole shadow-visit season (Settings → Season).
           </div>
         </div>
-        <RefreshSchedulesForm date={date} />
+        <RefreshSchedulesForm />
       </div>
 
       {hostRows.length === 0 ? (

@@ -5,22 +5,21 @@ import { refreshSchedules, type RefreshState } from "./actions";
 
 const initial: RefreshState = { ok: false, message: "" };
 
-export default function RefreshSchedulesForm({ date }: { date: string }) {
+export default function RefreshSchedulesForm() {
   const [state, action, pending] = useActionState(refreshSchedules, initial);
 
   return (
     <form action={action} className="flex flex-col items-end gap-1">
-      <input type="hidden" name="date" value={date} />
       <button
         type="submit"
         disabled={pending}
         className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700"
       >
-        {pending ? "Refreshing…" : "Refresh schedules"}
+        {pending ? "Syncing…" : "Refresh schedules"}
       </button>
       <span className="max-w-xs text-right text-xs text-zinc-500">
         {pending
-          ? "Pulling from Outlook for every linked host — this can take a little while."
+          ? "Pulling from Outlook for every linked host across the whole season — this can take a little while."
           : state.message}
       </span>
     </form>
