@@ -37,6 +37,24 @@ yarn-error.log*
 # real student data used as parser fixtures (PII — keep out of git)
 /fixtures/
 
+# Working files at the repo root that hold real data. These were untracked
+# but NOT ignored, so a single `git add -A` would have committed them
+# permanently. Specifically:
+#   - /Screenshots/ — source images for public/help/calendar-link.html.
+#     Three of them ("Publish", "ICS", "Copy Link") show a real, live
+#     Outlook ICS subscription URL in readable text. That URL is an
+#     unauthenticated, permanent feed of one person's calendar, including
+#     class titles and locations. It must never enter git history, where
+#     it would survive any later deletion.
+#   - /host ICS.ics, /host schedule by block.xls, /Test Report-test.xlsx —
+#     real student schedules and a real report export.
+#   - /PRD Notes.docx — internal planning notes.
+/Screenshots/
+/host ICS.ics
+/host schedule by block.xls
+/Test Report-test.xlsx
+/PRD Notes.docx
+
 # vercel
 .vercel
 

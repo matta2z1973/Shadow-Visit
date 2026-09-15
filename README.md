@@ -439,7 +439,10 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
      guide instead: an Artifact page at
      https://claude.ai/code/artifact/27730909-9dd0-4697-898b-79fb011c746c
      (source: `outlook-ics-guide.html`, not part of the repo — a
-     standalone published page, hardcoded into `page.tsx`'s href). Covers
+     standalone published page, hardcoded into `page.tsx`'s href).
+     **Superseded by item 16** — the guide now lives in this repo at
+     `public/help/calendar-link.html` and `/me` links to `/help/calendar-link`.
+     Covers
      the exact flow verified against a real feed earlier this session:
      outlook.office.com → Settings → Calendar → Shared calendars → Publish
      a calendar → "Can view titles and locations" → copy the `.ics` link,
@@ -958,6 +961,50 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
     calendar-subscription URL in the background). Two of the four steps
     display their screenshot at half size (CSS `max-width`, not a
     re-exported lower-resolution asset, so it stays crisp).
+    **Superseded by item 16**, which also corrects the count above: it is
+    *three* of the screenshots that contain the readable ICS URL, not two.
+
+16. **Calendar-link guide moved in-repo and made publicly reachable**
+    (2026-09-15). `/me`'s "❓ Help me find this" pointed at a claude.ai
+    Artifact, which is only viewable by someone signed in to a Claude
+    account in this org. Host students are exactly the people who won't
+    have one, so for them the help link was a dead end. The guide is now a
+    self-contained static page in this repo, served by the app itself.
+    - `public/help/calendar-link.html` — the guide, derived from the
+      Artifact's published HTML. Self-contained (inline CSS, inline image
+      data URIs, no JS, no external requests) and independent of the root
+      layout, so it renders for a signed-out visitor with no account and no
+      DB read. Light/dark theming carried over from the Artifact.
+    - `next.config.ts` — a rewrite so the URL we hand out is a clean
+      `/help/calendar-link` rather than exposing the `.html` extension.
+    - `src/proxy.ts` — `help/` added to the middleware matcher's exclusion
+      list. It's a public static page; refreshing the Supabase session on it
+      only buys a wasted Auth round trip (worst case a 10s stall) to set a
+      cookie nothing reads.
+    - `src/app/me/page.tsx` — href swapped from the Artifact URL to
+      `/help/calendar-link`. (Item 7's note still stands: if a real
+      screen-capture video ever gets recorded, swap this href again.)
+    - **Security fix, the reason this couldn't just be a permissions
+      toggle.** Three of the six embedded screenshots ("Publish your
+      calendar" and both "Copy the ICS link" shots) show a real, live
+      Outlook subscription URL in fully readable text. That URL is an
+      unauthenticated, permanent feed of one person's actual calendar,
+      including class titles and locations — publishing it to the open web
+      would have handed it to anyone who looked. Those three are **not** in
+      the in-repo page: they're replaced with synthetic CSS mockups built
+      from the `.mock-link-row` / `.tag` styles the stylesheet already
+      carried (unused leftovers from the guide's pre-screenshot version).
+      The mockups are arguably clearer than the originals anyway — the
+      HTML-vs-ICS row is labelled NOT THIS / COPY THIS — and dropping the
+      three images took the page from 242KB to 89KB. The three remaining
+      screenshots (Settings menu, Settings panel, Shared calendars) contain
+      no URL; the build script asserts by pixel dimensions that only those
+      three survive, and refuses to write the file otherwise.
+    - **Still outstanding for the user:** the published Artifact itself has
+      not been changed and *still contains all three leaking screenshots*.
+      And the leaked URL is live regardless of what any document does with
+      it — Outlook's "Publish a calendar" screen has a **Reset links**
+      button that invalidates it. Do that.
 
 ## Git status
 

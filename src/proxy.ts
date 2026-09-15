@@ -7,6 +7,10 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // `/help/*` is deliberately excluded: those pages are public static HTML
+    // for people who aren't signed in, so running the session refresh on
+    // them would spend a Supabase Auth round trip (and a 10s worst-case
+    // stall — see updateSupabaseSession) to produce a cookie nothing reads.
+    "/((?!_next/static|_next/image|favicon.ico|help/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

@@ -54,7 +54,7 @@ export default async function MePage() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">My schedule</h2>
           <a
-            href="https://claude.ai/code/artifact/27730909-9dd0-4697-898b-79fb011c746c"
+            href="/help/calendar-link"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
