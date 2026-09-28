@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import {
   uploadProspectiveReport,
   type ProspectiveUploadResult,
-} from "./prospective-actions";
+} from "./prospective-report-actions";
 
 const initial: ProspectiveUploadResult = { ok: false, message: "", perFile: [] };
 
