@@ -217,3 +217,42 @@ export async function uploadProspectiveReport(
     perFile,
   };
 }
+
+export type DeleteBatchResult = { ok: boolean; message: string };
+
+// Deletes an upload batch and every prospective student still associated
+// with it (a student who's since been touched by a *later* re-upload — see
+// the dedup logic above — has already moved to that batch's id, so this
+// only removes whoever this specific batch is still the most recent source
+// for). prospectiveStudents.importBatchId itself is ON DELETE SET NULL, so
+// deleting the batch row alone would silently orphan the reference instead
+// of removing the students — deleting the students first, explicitly, is
+// what actually does the "undo this upload" the admin is asking for. Their
+// interests/flags/matches cascade automatically from the prospective row's
+// own FK (ON DELETE CASCADE).
+export async function deleteImportBatch(
+  _prev: DeleteBatchResult | undefined,
+  formData: FormData,
+): Promise<DeleteBatchResult> {
+  await requireAdmin();
+  const batchId = formData.get("batchId");
+  if (typeof batchId !== "string") {
+    return { ok: false, message: "Missing batch id." };
+  }
+
+  const removedStudents = await db
+    .delete(prospectiveStudents)
+    .where(eq(prospectiveStudents.importBatchId, batchId))
+    .returning({ id: prospectiveStudents.id });
+  await db.delete(importBatches).where(eq(importBatches.id, batchId));
+
+  revalidatePath("/admin/prospectives/upload");
+  revalidatePath("/admin/prospectives");
+  revalidatePath("/admin");
+  revalidatePath("/admin/match");
+
+  return {
+    ok: true,
+    message: `Deleted the upload and ${removedStudents.length} associated student(s).`,
+  };
+}

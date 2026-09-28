@@ -1,10 +1,11 @@
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { importBatches } from "@/lib/db/schema";
-import { desc } from "drizzle-orm";
+import { importBatches, prospectiveStudents } from "@/lib/db/schema";
+import { desc, inArray, sql } from "drizzle-orm";
 import ProspectivesTabs from "@/components/prospectives-tabs";
 import PageLoadError from "@/components/page-load-error";
 import ProspectiveReportUploadForm from "../../uploads/prospective-report-upload-form";
+import DeleteBatchButton from "../../uploads/delete-batch-button";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +15,25 @@ const card =
 export default async function ProspectivesUploadPage() {
   await requireAdmin();
   let recent: (typeof importBatches.$inferSelect)[];
+  let studentCountByBatch: Map<string, number>;
   try {
     recent = await db
       .select()
       .from(importBatches)
       .orderBy(desc(importBatches.createdAt))
       .limit(10);
+
+    const batchIds = recent.filter((b) => b.kind === "prospective").map((b) => b.id);
+    const counts = batchIds.length
+      ? await db
+          .select({ importBatchId: prospectiveStudents.importBatchId, n: sql<number>`count(*)::int` })
+          .from(prospectiveStudents)
+          .where(inArray(prospectiveStudents.importBatchId, batchIds))
+          .groupBy(prospectiveStudents.importBatchId)
+      : [];
+    studentCountByBatch = new Map(
+      counts.filter((c) => c.importBatchId).map((c) => [c.importBatchId as string, c.n]),
+    );
   } catch (err) {
     console.error("ProspectivesUploadPage: failed to load data", err);
     return <PageLoadError />;
@@ -39,30 +53,54 @@ export default async function ProspectivesUploadPage() {
           date, and up to two ranked interests (the paired &ldquo;Involvement&rdquo;
           columns are proficiency levels and aren&rsquo;t used). Any row missing
           gender is flagged after upload — fill it in on the prospective&rsquo;s
-          record before matching runs (gender is a hard filter).
+          record before matching runs (gender is a hard filter). Re-uploading
+          updates anyone already on file (matched by name + grade) instead of
+          duplicating them.
         </p>
         <ProspectiveReportUploadForm />
       </section>
 
       <section className="mt-10">
         <h2 className="text-lg font-semibold">Recent uploads</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Deleting an upload also removes whichever prospective students are still
+          associated with it (and their interests/flags/matches) — not just the
+          upload record.
+        </p>
         {recent.length === 0 ? (
           <p className="mt-2 text-sm text-zinc-500">Nothing uploaded yet.</p>
         ) : (
           <ul className="mt-3 divide-y divide-zinc-200 rounded-lg border border-zinc-200 text-sm dark:divide-zinc-800 dark:border-zinc-800">
-            {recent.map((b) => (
-              <li key={b.id} className="flex items-center justify-between px-4 py-2.5">
-                <span>
-                  <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium dark:bg-zinc-800">
-                    {b.kind}
-                  </span>{" "}
-                  {b.fileName}
-                </span>
-                <span className="text-xs text-zinc-500">
-                  {b.createdAt?.toLocaleString?.() ?? ""}
-                </span>
-              </li>
-            ))}
+            {recent.map((b) => {
+              const studentCount = studentCountByBatch.get(b.id) ?? 0;
+              return (
+                <li key={b.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <span>
+                    <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium dark:bg-zinc-800">
+                      {b.kind}
+                    </span>{" "}
+                    {b.fileName}
+                    {b.kind === "prospective" ? (
+                      <span className="ml-2 text-xs text-zinc-500">
+                        {studentCount} student{studentCount === 1 ? "" : "s"} on file
+                      </span>
+                    ) : null}
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-zinc-500">
+                      {b.createdAt?.toLocaleString?.() ?? ""}
+                    </span>
+                    {b.kind === "prospective" ? (
+                      <DeleteBatchButton
+                        batchId={b.id}
+                        fileName={b.fileName ?? "this upload"}
+                        studentCount={studentCount}
+                      />
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
