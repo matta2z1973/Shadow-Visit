@@ -86,7 +86,8 @@ export async function uploadProspectiveReport(
         defval: null,
         raw: false,
       });
-      const { rows: parsedRows, warnings: reportWarnings } = parseProspectiveReportRows(rows);
+      const { rows: parsedRows, warnings: reportWarnings, notes: reportNotes } =
+        parseProspectiveReportRows(rows);
 
       if (reportWarnings.length) {
         perFile.push({
@@ -195,6 +196,7 @@ export async function uploadProspectiveReport(
         skipped ? `${skipped} skipped (no name)` : null,
         unmappedTotal ? `⚠ ${unmappedTotal} unmapped interest(s)` : null,
         missingGender ? `⚠ ${missingGender} missing gender — fill in manually` : null,
+        ...reportNotes.map((n) => `ℹ ${n}`),
       ].filter(Boolean);
       perFile.push({ fileName: file.name, status: bits.join(" · ") });
     } catch (e) {
