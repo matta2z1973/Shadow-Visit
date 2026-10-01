@@ -7,6 +7,7 @@ import {
   matches,
   appSettings,
   interests,
+  profiles,
 } from "@/lib/db/schema";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import HostsTabs from "@/components/hosts-tabs";
@@ -26,12 +27,26 @@ async function getSoftCap(): Promise<number> {
   return Number.isFinite(n) ? n : 5;
 }
 
+// What the roster query returns: the host columns the table renders, plus
+// the claimed profile's email (null until the student logs in).
+type HostRosterRow = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  fullName: string;
+  grade: number | null;
+  gender: "M" | "F" | null;
+  active: boolean;
+  icsUrl: string | null;
+  email: string | null;
+};
+
 export default async function HostsPage() {
   await requireAdmin();
 
   type HostsPageData = {
     softCap: number;
-    hosts: (typeof hostStudents.$inferSelect)[];
+    hosts: HostRosterRow[];
     allInterests: (typeof interests.$inferSelect)[];
     hostInterestRows: (typeof hostStudentInterests.$inferSelect)[];
     countMap: Map<string, number>;
@@ -58,7 +73,25 @@ export default async function HostsPage() {
       timed(
         reqId,
         "hosts: host roster",
-        db.select().from(hostStudents).orderBy(asc(hostStudents.fullName)),
+        // Email lives on profiles, not host_students — a host only has one
+        // once they've logged in and claimed their record. Left join so
+        // admin-created rows (CSV/seed import, no profile yet) still appear,
+        // just with no address to copy.
+        db
+          .select({
+            id: hostStudents.id,
+            firstName: hostStudents.firstName,
+            lastName: hostStudents.lastName,
+            fullName: hostStudents.fullName,
+            grade: hostStudents.grade,
+            gender: hostStudents.gender,
+            active: hostStudents.active,
+            icsUrl: hostStudents.icsUrl,
+            email: profiles.email,
+          })
+          .from(hostStudents)
+          .leftJoin(profiles, eq(hostStudents.profileId, profiles.id))
+          .orderBy(asc(hostStudents.fullName)),
       ),
       timed(
         reqId,
@@ -136,6 +169,7 @@ export default async function HostsPage() {
     icsUrl: h.icsUrl,
     visits: countMap.get(h.id) ?? 0,
     hasSchedule: hasSchedule(h.id, h.icsUrl),
+    email: h.email,
     interestIds: interestsByHost.get(h.id) ?? [],
   }));
 

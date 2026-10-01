@@ -13,7 +13,7 @@
 // no admin capability is lost, it just stops competing for attention with the
 // other 200 hosts.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import { updateHost, setHostInterests, deleteHost, setHostFeed } from "./actions";
 
@@ -26,6 +26,7 @@ export type HostRow = {
   gender: "M" | "F" | null;
   active: boolean;
   icsUrl: string | null;
+  email: string | null;
   visits: number;
   hasSchedule: boolean;
   interestIds: string[];
@@ -147,6 +148,9 @@ export default function HostsTable({
   // questions ("who could cover either of these?" vs "who covers both?"),
   // and both get asked when staffing a visit.
   const [interestMode, setInterestMode] = useState<"any" | "all">("any");
+  const [calendar, setCalendar] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [copied, setCopied] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
   const interestName = useMemo(
@@ -199,6 +203,10 @@ export default function HostsTable({
         const key = h.gender ?? NO_VALUE;
         if (!genders.has(key)) return false;
       }
+      if (calendar.size) {
+        const key = h.icsUrl ? "yes" : "no";
+        if (!calendar.has(key)) return false;
+      }
       if (interestIds.size) {
         const owned = new Set(h.interestIds);
         const picked = [...interestIds];
@@ -211,7 +219,84 @@ export default function HostsTable({
       return true;
     });
     return rows.sort((a, b) => compare(a, b, sortKey, sortDir));
-  }, [hosts, haystacks, terms, grades, genders, interestIds, interestMode, sortKey, sortDir]);
+  }, [hosts, haystacks, terms, grades, genders, calendar, interestIds, interestMode, sortKey, sortDir]);
+
+  // --- selection + "copy emails" -------------------------------------------
+  // Selection is by host id and survives filter changes on purpose: picking
+  // grade 11, selecting all, then switching to grade 12 and selecting all is
+  // a real way to build a mailing list. The toolbar says how many of the
+  // selected are currently hidden so that can never be a silent surprise.
+  const visibleIds = useMemo(() => visible.map((h) => h.id), [visible]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const someVisibleSelected = visibleIds.some((id) => selected.has(id));
+
+  const headerBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerBox.current) {
+      headerBox.current.indeterminate = someVisibleSelected && !allVisibleSelected;
+    }
+  }, [someVisibleSelected, allVisibleSelected]);
+
+  const toggleAllVisible = () => {
+    const next = new Set(selected);
+    if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+    else visibleIds.forEach((id) => next.add(id));
+    setSelected(next);
+  };
+
+  const chosen = useMemo(
+    () => hosts.filter((h) => selected.has(h.id)),
+    [hosts, selected],
+  );
+  const chosenEmails = chosen
+    .map((h) => h.email)
+    .filter((e): e is string => !!e && e.trim().length > 0);
+  const missingEmail = chosen.length - chosenEmails.length;
+  const hiddenSelected = chosen.length - chosen.filter((h) => visibleIds.includes(h.id)).length;
+
+  // Outlook and Gmail both accept a semicolon-separated list pasted into To:.
+  const copyEmails = async () => {
+    const text = chosenEmails.join("; ");
+    if (!text) {
+      setCopied("Nothing to copy — none of the selected hosts have an email on file.");
+      return;
+    }
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      // clipboard API needs a secure context and can be blocked outright;
+      // fall back to the old selection trick rather than failing silently.
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch {
+        ok = false;
+      }
+    }
+    setCopied(
+      ok
+        ? `Copied ${chosenEmails.length} address${chosenEmails.length === 1 ? "" : "es"}.`
+        : "Couldn't reach the clipboard — select the addresses manually.",
+    );
+  };
+
+  // Clear the confirmation after a moment so it can't be mistaken for the
+  // result of a later, different selection.
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(null), 4000);
+    return () => clearTimeout(t);
+  }, [copied]);
 
   const onSort = (k: SortKey) => {
     if (k === sortKey) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -222,11 +307,16 @@ export default function HostsTable({
   };
 
   const filtersOn =
-    terms.length > 0 || grades.size > 0 || genders.size > 0 || interestIds.size > 0;
+    terms.length > 0 ||
+    grades.size > 0 ||
+    genders.size > 0 ||
+    calendar.size > 0 ||
+    interestIds.size > 0;
   const clearAll = () => {
     setQuery("");
     setGrades(new Set());
     setGenders(new Set());
+    setCalendar(new Set());
     setInterestIds(new Set());
   };
 
@@ -299,6 +389,20 @@ export default function HostsTable({
               </Pill>
               <Pill on={genders.has(NO_VALUE)} onClick={() => setGenders(toggle(genders, NO_VALUE))}>
                 Unset
+              </Pill>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Calendar
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <Pill on={calendar.has("yes")} onClick={() => setCalendar(toggle(calendar, "yes"))}>
+                Link saved
+              </Pill>
+              <Pill on={calendar.has("no")} onClick={() => setCalendar(toggle(calendar, "no"))}>
+                No link
               </Pill>
             </div>
           </div>
@@ -379,14 +483,62 @@ export default function HostsTable({
             </button>
           ) : null}
         </div>
+
+        {selected.size > 0 ? (
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-zinc-200 bg-ivory px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-800">
+            <span className="text-zinc-700 dark:text-zinc-200">
+              <strong>{selected.size}</strong> selected
+              {hiddenSelected > 0 ? (
+                <span className="text-zinc-500"> ({hiddenSelected} hidden by filters)</span>
+              ) : null}
+            </span>
+            <button
+              type="button"
+              onClick={copyEmails}
+              className="rounded-md bg-forest px-2.5 py-1 font-medium text-white"
+            >
+              Copy {chosenEmails.length} email{chosenEmails.length === 1 ? "" : "s"}
+            </button>
+            {missingEmail > 0 ? (
+              <span
+                className="text-amber-700 dark:text-amber-300"
+                title="A host only has an email once they've logged in and claimed their record."
+              >
+                {missingEmail} of these have no email on file
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="text-zinc-500 hover:underline"
+            >
+              Clear selection
+            </button>
+            {copied ? (
+              <span role="status" className="text-forest dark:text-emerald-400">
+                {copied}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {/* Table */}
       <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
-        <table className="w-full min-w-[46rem] border-collapse text-sm">
+        <table className="w-full min-w-[52rem] border-collapse text-sm">
           <thead className="border-b border-zinc-200 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
             <tr>
-              <SortHeader label="First name" col="firstName" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="pl-4" />
+              <th scope="col" className="w-10 py-2 pl-4 pr-1">
+                <input
+                  ref={headerBox}
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleAllVisible}
+                  aria-label="Select all shown hosts"
+                  className="h-4 w-4 align-middle"
+                />
+              </th>
+              <SortHeader label="First name" col="firstName" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
               <SortHeader label="Last name" col="lastName" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
               <SortHeader label="Grade" col="grade" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="w-20" />
               <th scope="col" className="w-20 px-3 py-2 text-left font-semibold">
@@ -409,7 +561,7 @@ export default function HostsTable({
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-sm text-zinc-500">
+                <td colSpan={9} className="px-3 py-8 text-center text-sm text-zinc-500">
                   {hosts.length === 0
                     ? "No hosts yet. Upload host schedules or have students log in."
                     : "No hosts match these filters."}
@@ -428,6 +580,8 @@ export default function HostsTable({
                     softCap={softCap}
                     allInterests={allInterests}
                     onToggle={() => setOpenId(open ? null : h.id)}
+                    checked={selected.has(h.id)}
+                    onCheck={() => setSelected(toggle(selected, h.id))}
                   />
                 );
               })
@@ -446,6 +600,8 @@ function HostRowView({
   softCap,
   allInterests,
   onToggle,
+  checked,
+  onCheck,
 }: {
   host: HostRow;
   open: boolean;
@@ -453,6 +609,8 @@ function HostRowView({
   softCap: number;
   allInterests: InterestOption[];
   onToggle: () => void;
+  checked: boolean;
+  onCheck: () => void;
 }) {
   const selected = new Set(h.interestIds);
   return (
@@ -462,7 +620,16 @@ function HostRowView({
           open ? "bg-zinc-50 dark:bg-zinc-900" : ""
         } ${h.active ? "" : "opacity-60"}`}
       >
-        <td className="py-2 pl-4 pr-3">
+        <td className="py-2 pl-4 pr-1">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={onCheck}
+            aria-label={`Select ${h.fullName}`}
+            className="h-4 w-4 align-middle"
+          />
+        </td>
+        <td className="px-3 py-2">
           {h.firstName || <span className="text-zinc-400">—</span>}
           {!h.active ? (
             <span className="ml-2 rounded bg-zinc-200 px-1.5 py-0.5 text-xs text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
@@ -531,7 +698,7 @@ function HostRowView({
 
       {open ? (
         <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
-          <td colSpan={8} className="px-4 py-4">
+          <td colSpan={9} className="px-4 py-4">
             <form action={updateHost} className="flex flex-wrap items-end gap-3">
               <input type="hidden" name="id" value={h.id} />
               <label className="flex flex-col gap-1 text-xs">
