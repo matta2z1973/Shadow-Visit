@@ -9,32 +9,12 @@ import {
   interests,
 } from "@/lib/db/schema";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import HostsTabs from "@/components/hosts-tabs";
 import PageLoadError from "@/components/page-load-error";
-import { updateHost, setHostInterests, deleteHost, setHostFeed } from "./actions";
+import HostsTable, { type HostRow, type InterestOption } from "./hosts-table";
 import { newRequestId, timed } from "@/lib/debug-timing";
 
 export const dynamic = "force-dynamic";
-
-function FeedForm({ id, url }: { id: string; url: string | null }) {
-  return (
-    <form action={setHostFeed} className="mt-2 flex items-center gap-2">
-      <input type="hidden" name="id" value={id} />
-      <input
-        name="icsUrl"
-        type="url"
-        defaultValue={url ?? ""}
-        placeholder="Calendar .ics link (Outlook: Publish a calendar → titles and locations)"
-        className="flex-1 rounded-md border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
-      />
-      <button type="submit" className="text-xs text-zinc-500 underline-offset-2 hover:underline">
-        save link
-      </button>
-      {url ? <span className="text-xs text-green-600">●</span> : null}
-    </form>
-  );
-}
 
 async function getSoftCap(): Promise<number> {
   const [row] = await db
@@ -45,9 +25,6 @@ async function getSoftCap(): Promise<number> {
   const n = row ? parseInt(row.value, 10) : 5;
   return Number.isFinite(n) ? n : 5;
 }
-
-const field =
-  "rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900";
 
 export default async function HostsPage() {
   await requireAdmin();
@@ -138,11 +115,38 @@ export default async function HostsPage() {
     !!icsUrl || !!scheduleCountMap.get(id);
   const missingSchedule = hosts.filter((h) => !hasSchedule(h.id, h.icsUrl)).length;
 
-  const interestsFor = (hostId: string) =>
-    new Set(hostInterestRows.filter((r) => r.hostStudentId === hostId).map((r) => r.interestId));
+  // One pass to group interest links by host, rather than re-scanning the
+  // whole link table once per host — the interests filter means every row's
+  // links are needed, so this is now on the critical path for the page.
+  const interestsByHost = new Map<string, string[]>();
+  for (const r of hostInterestRows) {
+    const list = interestsByHost.get(r.hostStudentId);
+    if (list) list.push(r.interestId);
+    else interestsByHost.set(r.hostStudentId, [r.interestId]);
+  }
+
+  const rows: HostRow[] = hosts.map((h) => ({
+    id: h.id,
+    firstName: h.firstName,
+    lastName: h.lastName,
+    fullName: h.fullName,
+    grade: h.grade,
+    gender: h.gender,
+    active: h.active,
+    icsUrl: h.icsUrl,
+    visits: countMap.get(h.id) ?? 0,
+    hasSchedule: hasSchedule(h.id, h.icsUrl),
+    interestIds: interestsByHost.get(h.id) ?? [],
+  }));
+
+  const interestOptions: InterestOption[] = allInterests.map((i) => ({
+    id: i.id,
+    name: i.name,
+    category: i.category,
+  }));
 
   return (
-    <main className="mx-auto w-full max-w-4xl px-6 py-10">
+    <main className="mx-auto w-full max-w-6xl px-6 py-10">
       <div className="flex items-baseline justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Hosts</h1>
         <span className="text-sm text-zinc-500">
@@ -208,104 +212,7 @@ export default async function HostsPage() {
         </div>
       ) : null}
 
-      <div className="mt-6 space-y-3">
-        {hosts.length === 0 ? (
-          <p className="text-sm text-zinc-500">
-            No hosts yet. Upload host schedules or have students log in.
-          </p>
-        ) : (
-          hosts.map((h) => {
-            const used = countMap.get(h.id) ?? 0;
-            const over = used >= softCap;
-            const selected = interestsFor(h.id);
-            return (
-              <div key={h.id} className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-                <form action={updateHost} className="flex flex-wrap items-end gap-3">
-                  <input type="hidden" name="id" value={h.id} />
-                  <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-zinc-500">First name</span>
-                    <input name="firstName" defaultValue={h.firstName ?? ""} className={`${field} w-32`} />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-zinc-500">Last name</span>
-                    <input name="lastName" defaultValue={h.lastName ?? ""} className={`${field} w-32`} />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-zinc-500">Grade</span>
-                    <input name="grade" type="number" min={1} max={12} defaultValue={h.grade ?? ""} className={`${field} w-16`} />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-zinc-500">Gender</span>
-                    <select name="gender" defaultValue={h.gender ?? ""} className={field}>
-                      <option value="">—</option>
-                      <option value="M">M</option>
-                      <option value="F">F</option>
-                    </select>
-                  </label>
-                  <label className="flex items-center gap-1.5 pb-1.5 text-xs">
-                    <input type="checkbox" name="active" defaultChecked={h.active} className="h-4 w-4" />
-                    <span>Active</span>
-                  </label>
-                  <button type="submit" className="rounded-md bg-forest px-3 py-1.5 text-sm font-medium text-white dark:bg-forest dark:text-white">
-                    Save
-                  </button>
-                  <span className="pb-1.5 text-xs">
-                    Visits: {used}/{softCap}{" "}
-                    {over ? (
-                      <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
-                        at/over cap
-                      </span>
-                    ) : null}
-                    {!hasSchedule(h.id, h.icsUrl) ? (
-                      <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
-                        no calendar link
-                      </span>
-                    ) : null}
-                  </span>
-                </form>
-
-                <FeedForm id={h.id} url={h.icsUrl} />
-
-                <details className="mt-3 rounded-md border border-zinc-200 dark:border-zinc-800">
-                  <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
-                    Interests ({selected.size})
-                  </summary>
-                  <form action={setHostInterests} className="px-3 pb-3">
-                    <input type="hidden" name="id" value={h.id} />
-                    {INTEREST_CATEGORIES.map((c) => {
-                      const items = allInterests.filter((i) => i.category === c.slug);
-                      if (!items.length) return null;
-                      return (
-                        <fieldset key={c.slug} className="mt-2">
-                          <legend className="text-xs font-semibold text-zinc-500">{c.label}</legend>
-                          <div className="mt-1 grid grid-cols-2 gap-1 sm:grid-cols-3">
-                            {items.map((i) => (
-                              <label key={i.id} className="flex items-center gap-1.5 text-sm">
-                                <input type="checkbox" name="interestIds" value={i.id} defaultChecked={selected.has(i.id)} className="h-4 w-4" />
-                                <span>{i.name}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </fieldset>
-                      );
-                    })}
-                    <button type="submit" className="mt-3 rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">
-                      Save interests
-                    </button>
-                  </form>
-                </details>
-
-                <form action={deleteHost} className="mt-2">
-                  <input type="hidden" name="id" value={h.id} />
-                  <button type="submit" className="text-xs text-red-600 hover:underline">
-                    delete host
-                  </button>
-                </form>
-              </div>
-            );
-          })
-        )}
-      </div>
+      <HostsTable hosts={rows} allInterests={interestOptions} softCap={softCap} />
     </main>
   );
 }
