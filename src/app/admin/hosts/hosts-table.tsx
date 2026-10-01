@@ -386,10 +386,7 @@ export default function HostsTable({
         <table className="w-full min-w-[46rem] border-collapse text-sm">
           <thead className="border-b border-zinc-200 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
             <tr>
-              <th scope="col" className="w-8 px-2 py-2">
-                <span className="sr-only">Expand</span>
-              </th>
-              <SortHeader label="First name" col="firstName" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              <SortHeader label="First name" col="firstName" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="pl-4" />
               <SortHeader label="Last name" col="lastName" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
               <SortHeader label="Grade" col="grade" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="w-20" />
               <th scope="col" className="w-20 px-3 py-2 text-left font-semibold">
@@ -401,8 +398,11 @@ export default function HostsTable({
               <th scope="col" className="w-24 px-3 py-2 text-left font-semibold">
                 Visits
               </th>
-              <th scope="col" className="w-28 px-3 py-2 text-left font-semibold">
+              <th scope="col" className="w-24 px-3 py-2 text-left font-semibold">
                 Interests
+              </th>
+              <th scope="col" className="w-24 px-3 py-2 text-right font-semibold">
+                <span className="sr-only">Edit</span>
               </th>
             </tr>
           </thead>
@@ -462,18 +462,7 @@ function HostRowView({
           open ? "bg-zinc-50 dark:bg-zinc-900" : ""
         } ${h.active ? "" : "opacity-60"}`}
       >
-        <td className="px-2 py-2 align-middle">
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={open}
-            aria-label={`${open ? "Collapse" : "Expand"} ${h.fullName}`}
-            className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-          >
-            <span aria-hidden>{open ? "▾" : "▸"}</span>
-          </button>
-        </td>
-        <td className="px-3 py-2">
+        <td className="py-2 pl-4 pr-3">
           {h.firstName || <span className="text-zinc-400">—</span>}
           {!h.active ? (
             <span className="ml-2 rounded bg-zinc-200 px-1.5 py-0.5 text-xs text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
@@ -515,13 +504,27 @@ function HostRowView({
             </span>
           ) : null}
         </td>
+        {/* Plain count, not a control: the row has exactly one way to open,
+            the Edit button, so nothing here implies it expands just this
+            column. */}
         <td className="px-3 py-2">
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs tabular-nums text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+            {h.interestIds.length}
+          </span>
+        </td>
+        <td className="px-3 py-2 text-right">
           <button
             type="button"
             onClick={onToggle}
-            className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            aria-expanded={open}
+            aria-label={`${open ? "Close" : "Edit"} ${h.fullName}`}
+            className={
+              open
+                ? "rounded-md border border-forest bg-forest px-2.5 py-1 text-xs font-medium text-white"
+                : "rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            }
           >
-            {h.interestIds.length} ▾
+            {open ? "Close ▴" : "Edit ▾"}
           </button>
         </td>
       </tr>
