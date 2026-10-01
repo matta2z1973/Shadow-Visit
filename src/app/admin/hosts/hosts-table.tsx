@@ -139,6 +139,7 @@ export default function HostsTable({
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("lastName");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [query, setQuery] = useState("");
   const [grades, setGrades] = useState<Set<string>>(new Set());
   const [genders, setGenders] = useState<Set<string>>(new Set());
   const [interestIds, setInterestIds] = useState<Set<string>>(new Set());
@@ -166,8 +167,30 @@ export default function HostsTable({
     };
   }, [hosts]);
 
+  // Match each whitespace-separated word independently against the host's
+  // names, so the roster finds people the way staff actually type them —
+  // "okafor amara" and "amara okafor" both land, and so does "oka am".
+  const terms = useMemo(
+    () => query.trim().toLowerCase().split(/\s+/).filter(Boolean),
+    [query],
+  );
+  const haystacks = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const h of hosts) {
+      m.set(
+        h.id,
+        `${h.firstName ?? ""} ${h.lastName ?? ""} ${h.fullName}`.toLowerCase(),
+      );
+    }
+    return m;
+  }, [hosts]);
+
   const visible = useMemo(() => {
     const rows = hosts.filter((h) => {
+      if (terms.length) {
+        const hay = haystacks.get(h.id) ?? "";
+        if (!terms.every((t) => hay.includes(t))) return false;
+      }
       if (grades.size) {
         const key = h.grade == null ? NO_VALUE : String(h.grade);
         if (!grades.has(key)) return false;
@@ -188,7 +211,7 @@ export default function HostsTable({
       return true;
     });
     return rows.sort((a, b) => compare(a, b, sortKey, sortDir));
-  }, [hosts, grades, genders, interestIds, interestMode, sortKey, sortDir]);
+  }, [hosts, haystacks, terms, grades, genders, interestIds, interestMode, sortKey, sortDir]);
 
   const onSort = (k: SortKey) => {
     if (k === sortKey) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -198,8 +221,10 @@ export default function HostsTable({
     }
   };
 
-  const filtersOn = grades.size > 0 || genders.size > 0 || interestIds.size > 0;
+  const filtersOn =
+    terms.length > 0 || grades.size > 0 || genders.size > 0 || interestIds.size > 0;
   const clearAll = () => {
+    setQuery("");
     setGrades(new Set());
     setGenders(new Set());
     setInterestIds(new Set());
@@ -209,6 +234,35 @@ export default function HostsTable({
     <div className="mt-6">
       {/* Filters */}
       <div className="rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="mb-3 border-b border-zinc-200 pb-3 dark:border-zinc-800">
+          <label
+            htmlFor="host-search"
+            className="text-xs font-semibold uppercase tracking-wide text-zinc-500"
+          >
+            Search by name
+          </label>
+          <div className="relative mt-1.5 max-w-sm">
+            <input
+              id="host-search"
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="First or last name…"
+              autoComplete="off"
+              className="w-full rounded-md border border-zinc-300 py-1.5 pl-3 pr-8 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            />
+            {query ? (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear name search"
+                className="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+              >
+                <span aria-hidden>✕</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
         <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
