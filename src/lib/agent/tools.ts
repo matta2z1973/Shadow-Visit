@@ -28,6 +28,14 @@ import {
   matches,
 } from "@/lib/db/schema";
 import { INTEREST_CATEGORIES, type CategorySlug } from "@/lib/interest-categories";
+import {
+  listTree,
+  readFile,
+  proposeChange,
+  branchNameFor,
+  canWrite,
+  BASE_BRANCH,
+} from "./repo";
 
 export type ToolContext = { conversationId: string; profileId: string };
 
@@ -318,6 +326,156 @@ const toolList: ToolDef[] = [
         .from(hostStudents)
         .where(conds.length ? and(...conds) : undefined);
       return { result: { count: row?.n ?? 0, filter: input }, status: "ok" };
+    },
+  },
+
+  // --- code ---------------------------------------------------------------
+  // Reading is unrestricted within the policy in repo.ts; writing goes to a
+  // branch and a pull request, never to a running environment. The build of
+  // that branch is the gate.
+
+  {
+    name: "list_code_files",
+    description:
+      "List the source files of this application, optionally filtered by a path prefix or extension. Use this to orient yourself before reading. Files covering authentication, secrets, database schema and the assistant's own code are omitted — they are not editable and not your concern.",
+    schema: z.object({
+      prefix: z.string().optional().describe("e.g. 'src/app/admin' or 'src/components'"),
+      extension: z.string().optional().describe("e.g. 'tsx' or 'css'"),
+    }),
+    write: false,
+    run: async (input: { prefix?: string; extension?: string }) => {
+      let files = await listTree();
+      if (input.prefix) files = files.filter((f) => f.path.startsWith(input.prefix!));
+      if (input.extension) files = files.filter((f) => f.path.endsWith(`.${input.extension}`));
+      return {
+        result: {
+          branch: BASE_BRANCH,
+          count: files.length,
+          files: files.slice(0, 300).map((f) => ({ path: f.path, bytes: f.size })),
+        },
+        status: "ok",
+      };
+    },
+  },
+
+  {
+    name: "read_code_file",
+    description:
+      "Read one source file in full. Always read a file before proposing an edit to it — you must send back the complete new contents, so you need the current contents exactly.",
+    schema: z.object({ path: z.string() }),
+    write: false,
+    run: async (input: { path: string }) => {
+      try {
+        const file = await readFile(input.path);
+        return { result: file, status: "ok" };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not read that file.";
+        return { result: { error: message }, status: "refused", message };
+      }
+    },
+  },
+
+  {
+    name: "search_code",
+    description:
+      "Find which files contain a string or regular expression, with matching lines. Far cheaper than reading files one by one — use it to locate the code behind a feature before reading anything.",
+    schema: z.object({
+      pattern: z.string().describe("Plain text or a JavaScript regular expression."),
+      prefix: z.string().optional(),
+      maxFiles: z.number().int().min(1).max(40).optional(),
+    }),
+    write: false,
+    run: async (input: { pattern: string; prefix?: string; maxFiles?: number }) => {
+      let re: RegExp;
+      try {
+        re = new RegExp(input.pattern, "i");
+      } catch {
+        return { result: { error: "That isn't a valid search pattern." }, status: "refused" };
+      }
+      let files = await listTree();
+      if (input.prefix) files = files.filter((f) => f.path.startsWith(input.prefix!));
+      // Source only, and skip anything large — the data URIs in the help page
+      // would otherwise blow the context for no benefit.
+      files = files.filter(
+        (f) => /\.(tsx|ts|css|sql|md)$/.test(f.path) && (f.size ?? 0) < 120_000,
+      );
+
+      const limit = input.maxFiles ?? 12;
+      const hits: { path: string; lines: { n: number; text: string }[] }[] = [];
+      // Sequential on purpose: a parallel fan-out over the whole tree would
+      // burn the GitHub rate limit and the 60s budget on one search.
+      for (const f of files) {
+        if (hits.length >= limit) break;
+        let content: string;
+        try {
+          content = (await readFile(f.path)).content;
+        } catch {
+          continue;
+        }
+        const lines = content.split("\n");
+        const matched: { n: number; text: string }[] = [];
+        for (let i = 0; i < lines.length && matched.length < 8; i++) {
+          if (re.test(lines[i])) matched.push({ n: i + 1, text: lines[i].slice(0, 200) });
+        }
+        if (matched.length) hits.push({ path: f.path, lines: matched });
+      }
+      return { result: { pattern: input.pattern, searched: files.length, hits }, status: "ok" };
+    },
+  },
+
+  {
+    name: "propose_code_change",
+    description:
+      "Write changed files to a new branch and open a pull request. Send the COMPLETE new contents of each file, not a diff or a fragment — whatever you send replaces the file. Read each file first. Vercel builds the branch automatically; if the build fails the change goes nowhere, so a broken edit is safe but wasted. Explain to the admin in plain language what will visibly change before calling this.",
+    schema: z.object({
+      summary: z
+        .string()
+        .min(8)
+        .max(72)
+        .describe("Short imperative title, e.g. 'Add a dark mode toggle'."),
+      explanation: z
+        .string()
+        .describe("What changes and why, in the admin's own terms. Goes in the pull request."),
+      files: z
+        .array(z.object({ path: z.string(), content: z.string() }))
+        .min(1)
+        .max(20),
+    }),
+    write: true,
+    preview: (input: { summary: string; files: { path: string }[] }) =>
+      `${input.summary} (${input.files.length} file${input.files.length === 1 ? "" : "s"})`,
+    run: async (input: {
+      summary: string;
+      explanation: string;
+      files: { path: string; content: string }[];
+    }) => {
+      for (const f of input.files) {
+        const v = canWrite(f.path);
+        if (!v.allowed) {
+          return { result: { error: v.reason }, status: "refused", message: v.reason };
+        }
+      }
+      const branch = branchNameFor(input.summary);
+      try {
+        const pr = await proposeChange({
+          branch,
+          message: input.summary,
+          body: `${input.explanation}\n\n---\nProposed by the Shadow Visit admin assistant.`,
+          files: input.files,
+        });
+        return {
+          result: {
+            ...pr,
+            note: "Vercel is building a preview of this branch now. Tell the admin a preview is being built and that you'll confirm when it's ready.",
+          },
+          after: { branch: pr.branch, prUrl: pr.prUrl, files: input.files.map((f) => f.path) },
+          status: "ok",
+          message: input.summary,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not open the pull request.";
+        return { result: { error: message }, status: "error", message };
+      }
     },
   },
 ];
