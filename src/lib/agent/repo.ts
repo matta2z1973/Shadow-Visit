@@ -222,12 +222,16 @@ export type ChangeStatus = {
   detail: string;
 };
 
-type CheckRun = {
-  name: string;
-  status: string;
-  conclusion: string | null;
-  details_url: string | null;
-};
+// Vercel reports builds to GitHub as a COMMIT STATUS, not a check run. The
+// only check run on these commits is "Vercel Preview Comments", the comment
+// bot, which reports success as soon as it posts — entirely independently of
+// whether the build compiled. Gating on check runs therefore merged on a
+// green comment bot while the build was still pending. Gate on the commit
+// status, and on the one belonging to this project: the production project
+// also builds branch previews and its status is irrelevant here.
+const SANDBOX_STATUS_CONTEXT = "shadow-visit-sandbox";
+
+type CommitStatus = { context: string; state: string; target_url: string | null };
 
 export async function checkAndMerge(branch: string): Promise<ChangeStatus> {
   const prs = await gh<
@@ -247,45 +251,48 @@ export async function checkAndMerge(branch: string): Promise<ChangeStatus> {
     };
   }
 
-  const checks = await gh<{ check_runs: CheckRun[] }>(
-    `/repos/${OWNER}/${REPO}/commits/${pr.head.sha}/check-runs`,
+  const combined = await gh<{ statuses: CommitStatus[] }>(
+    `/repos/${OWNER}/${REPO}/commits/${pr.head.sha}/status`,
   );
-  const runs = checks.check_runs;
-  const preview = runs.find((r) => r.details_url)?.details_url ?? null;
+  const mine = combined.statuses.filter(
+    (st) => st.context.includes(SANDBOX_STATUS_CONTEXT) && /vercel/i.test(st.context),
+  );
 
-  if (runs.length === 0) {
+  if (mine.length === 0) {
     return {
       branch,
       prNumber: pr.number,
       state: "unknown",
       previewUrl: null,
       merged: false,
-      detail: "No build has been reported yet — it may not have started.",
+      detail: "The build has not reported yet. Check again shortly.",
     };
   }
-  if (runs.some((r) => r.status !== "completed")) {
+
+  const build = mine[0];
+  const url = build.target_url;
+
+  if (build.state === "pending") {
     return {
       branch,
       prNumber: pr.number,
       state: "building",
-      previewUrl: preview,
+      previewUrl: url,
       merged: false,
       detail: "The build is still running.",
     };
   }
-  const failed = runs.filter((r) => r.conclusion !== "success" && r.conclusion !== "neutral");
-  if (failed.length) {
+  if (build.state !== "success") {
     return {
       branch,
       prNumber: pr.number,
       state: "failed",
-      previewUrl: preview,
+      previewUrl: url,
       merged: false,
-      detail: `The build failed (${failed.map((f) => f.name).join(", ")}). Nothing was changed.`,
+      detail: `The build failed, so nothing was changed. Read the files again and fix the problem.`,
     };
   }
 
-  // Green. Merge into the sandbox branch, which triggers the sandbox deploy.
   await gh(`/repos/${OWNER}/${REPO}/pulls/${pr.number}/merge`, {
     method: "PUT",
     body: JSON.stringify({ merge_method: "squash" }),
@@ -294,7 +301,7 @@ export async function checkAndMerge(branch: string): Promise<ChangeStatus> {
     branch,
     prNumber: pr.number,
     state: "passed",
-    previewUrl: preview,
+    previewUrl: url,
     merged: true,
     detail: "The build passed and the change is now live on the sandbox site.",
   };
