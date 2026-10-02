@@ -43,6 +43,9 @@ export default async function SiteNav() {
               <Link href="/admin/interests" prefetch={false} className={linkCls}>
                 Settings
               </Link>
+              <Link href="/admin/assistant" prefetch={false} className={linkCls}>
+                Assistant
+              </Link>
             </>
           ) : (
             <Link href="/me" prefetch={false} className={linkCls}>

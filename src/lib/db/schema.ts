@@ -11,6 +11,7 @@ import {
   index,
   uniqueIndex,
   vector,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 // Course catalog embeddings use OpenAI text-embedding-3-small (1536 dims).
@@ -543,4 +544,69 @@ export const academicDays = pgTable(
     notes: text("notes"),
   },
   (t) => [uniqueIndex("academic_days_year_date_idx").on(t.academicYearId, t.date)],
+);
+
+// ---------------------------------------------------------------------------
+// Admin assistant (the in-app agent)
+// ---------------------------------------------------------------------------
+
+// One chat thread. Kept server-side rather than in the browser so an admin can
+// close the tab mid-task and the agent still knows what it already did, and so
+// every change it makes is attributable to a conversation after the fact.
+export const agentConversations = pgTable(
+  "agent_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    createdBy: uuid("created_by").references(() => profiles.id, {
+      onDelete: "set null",
+    }),
+    title: text("title"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("agent_conversations_created_by_idx").on(t.createdBy, t.updatedAt)],
+);
+
+// Raw Anthropic content blocks, stored verbatim. The API is stateless and the
+// whole thread is replayed on every turn, so anything lossy here (flattening
+// to a text string, dropping tool_use/tool_result blocks) would break the next
+// turn rather than merely degrade the transcript.
+export const agentMessages = pgTable(
+  "agent_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .references(() => agentConversations.id, { onDelete: "cascade" })
+      .notNull(),
+    role: text("role").notNull(), // "user" | "assistant"
+    content: jsonb("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("agent_messages_conversation_idx").on(t.conversationId, t.createdAt)],
+);
+
+// Every tool invocation, including ones that were refused. This is the audit
+// trail and the undo log: `before` holds enough state to reverse an applied
+// change, which is why it's captured even when nothing visibly changed.
+export const agentActions = pgTable(
+  "agent_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .references(() => agentConversations.id, { onDelete: "cascade" })
+      .notNull(),
+    tool: text("tool").notNull(),
+    input: jsonb("input"),
+    before: jsonb("before"),
+    after: jsonb("after"),
+    // "ok" | "error" | "refused"
+    status: text("status").notNull(),
+    message: text("message"),
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => profiles.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("agent_actions_conversation_idx").on(t.conversationId, t.createdAt)],
 );
