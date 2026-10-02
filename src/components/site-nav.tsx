@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { viewAsStudent, viewAsAdmin } from "@/app/view-as-actions";
+import ThemeToggle from "@/components/theme-toggle";
 
 const linkCls =
   "text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100";
@@ -82,6 +83,7 @@ export default async function SiteNav() {
               </form>
             )
           ) : null}
+          <ThemeToggle />
           <form action="/logout" method="post">
             <button type="submit" className="underline-offset-4 hover:underline">
               Sign out

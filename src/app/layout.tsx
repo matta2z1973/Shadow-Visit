@@ -28,6 +28,10 @@ export const metadata: Metadata = {
   description: "Admissions shadow-visit matching & scheduling for Greenhill School",
 };
 
+// Runs before first paint so a user who chose dark mode doesn't see a white
+// flash. Mirrors the localStorage key written by ThemeToggle.
+const themeInitScript = `try{if(localStorage.getItem("theme")==="dark"){document.documentElement.classList.add("dark")}}catch(e){}`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -37,7 +41,11 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${heading.variable} ${body.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className="min-h-full flex flex-col">
         {/* Unmissable in the sandbox, absent in production. Two deployments
             of the same app that look identical is how someone ends up
