@@ -1,16 +1,20 @@
 @import "tailwindcss";
 
-/* Force light theme: Tailwind's `dark:` variant defaults to following the
- * OS/browser color-scheme preference. Every component in this app has
- * `dark:` variants sprinkled throughout, so instead of stripping them all
- * out, we switch the variant to only activate on a `.dark` class we never
- * add anywhere — the `dark:` utilities become permanently inert and the
- * site renders light regardless of the visitor's system setting. */
+/* Theme switching: Tailwind's `dark:` variant is bound to a `.dark` class on
+ * <html> rather than the OS/browser color-scheme preference. The class is
+ * added/removed by the user's toggle (src/components/theme-toggle.tsx) and
+ * restored on load by the inline script in layout.tsx. Light is the default. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  color-scheme: dark;
 }
 
 /* Greenhill School brand palette — Style Guide, Aug 2024. */
