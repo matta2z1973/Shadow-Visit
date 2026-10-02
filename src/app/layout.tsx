@@ -39,6 +39,14 @@ export default function RootLayout({
       className={`${heading.variable} ${body.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {/* Unmissable in the sandbox, absent in production. Two deployments
+            of the same app that look identical is how someone ends up
+            editing real student records believing they're testing. */}
+        {process.env.NEXT_PUBLIC_APP_ENV === "sandbox" ? (
+          <div className="bg-copper px-4 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-white">
+            Sandbox — test data only. Nothing here affects the live Shadow Visit site.
+          </div>
+        ) : null}
         <SiteNav />
         {children}
       </body>

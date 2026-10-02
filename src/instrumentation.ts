@@ -18,4 +18,42 @@ export function register() {
   process.on("unhandledRejection", (reason) => {
     console.error("Unhandled rejection (contained, not crashing process):", reason);
   });
+
+  // Verify PG_VECTOR_TYPE_OID actually matches this database. A wrong value
+  // fails silently — no error, just the catastrophically slow unregistered-
+  // type path that once made `select * from interests` take two minutes (see
+  // src/lib/db/index.ts) — so it's worth one query to catch it.
+  //
+  // Deliberately NOT awaited. An awaited query at module-init gates every
+  // request the function will ever serve, which is itself a bug this project
+  // has already been bitten by (the dynamic OID lookup that used to live in
+  // db/index.ts hung the whole function regardless of which page was asked
+  // for). Fire-and-forget with its own timeout: if it can't answer quickly,
+  // we lose the check, not the deployment.
+  void (async () => {
+    try {
+      const { db } = await import("@/lib/db");
+      const { sql } = await import("drizzle-orm");
+      const expected = Number(process.env.PG_VECTOR_TYPE_OID ?? 17174);
+      const rows = (await Promise.race([
+        db.execute(sql`select oid::int as oid from pg_type where typname = 'vector'`),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("vector OID probe timed out")), 8_000),
+        ),
+      ])) as { oid: number }[];
+      const actual = rows?.[0]?.oid;
+      if (actual == null) {
+        console.warn("[startup] pgvector not installed in this database — vector columns will misbehave.");
+      } else if (actual !== expected) {
+        console.error(
+          `[startup] PG_VECTOR_TYPE_OID MISMATCH: configured ${expected}, database reports ${actual}. ` +
+            `Vector queries will take the slow fallback path. Set PG_VECTOR_TYPE_OID=${actual} for this environment.`,
+        );
+      } else {
+        console.log(`[startup] pgvector OID ${actual} matches configuration.`);
+      }
+    } catch (err) {
+      console.warn("[startup] could not verify pgvector OID:", err instanceof Error ? err.message : err);
+    }
+  })();
 }

@@ -33,7 +33,23 @@ if (!connectionString) {
 // specific database's pgvector extension isn't dropped and recreated; if
 // this project is ever migrated again, re-derive it once with:
 //   select oid from pg_type where typname = 'vector';
-const VECTOR_TYPE_OID = 17174; // shadow-visit-use1 (lqiqowvuvmrotoxtkvyl, us-east-1)
+//
+// Now overridable per environment, because it genuinely differs per database:
+// the sandbox project (lqzjktqpbwrcpgxdovpy, us-west-2) assigns 19175, not
+// 17174. Set PG_VECTOR_TYPE_OID in any environment pointed at a different
+// Postgres; the default keeps production working untouched. Getting this
+// wrong is silent — you don't get an error, you get the slow fallback path
+// that made `select * from interests` take two minutes — so the value is
+// asserted against the live database at startup in instrumentation.ts.
+const DEFAULT_VECTOR_TYPE_OID = 17174; // shadow-visit-use1 (lqiqowvuvmrotoxtkvyl, us-east-1)
+const VECTOR_TYPE_OID = process.env.PG_VECTOR_TYPE_OID
+  ? Number(process.env.PG_VECTOR_TYPE_OID)
+  : DEFAULT_VECTOR_TYPE_OID;
+if (!Number.isInteger(VECTOR_TYPE_OID) || VECTOR_TYPE_OID <= 0) {
+  throw new Error(
+    `PG_VECTOR_TYPE_OID must be a positive integer, got ${JSON.stringify(process.env.PG_VECTOR_TYPE_OID)}`,
+  );
+}
 
 // Serverless (Vercel) functions get frozen between invocations, and a
 // connection that's mid-query when that happens can get stranded — Postgres
