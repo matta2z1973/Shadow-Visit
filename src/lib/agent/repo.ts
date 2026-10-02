@@ -79,9 +79,16 @@ export function canWrite(path: string): PathVerdict {
 }
 
 function token(): string {
-  const t = process.env.GITHUB_TOKEN;
-  if (!t) throw new Error("GITHUB_TOKEN is not configured — code changes are unavailable.");
+  // Accepts either name: GITHUB_TOKEN is the convention, GITHUB_API_KEY is
+  // what the key was stored under. Tolerating both beats a rename that
+  // silently disables code changes if one place is missed.
+  const t = process.env.GITHUB_TOKEN ?? process.env.GITHUB_API_KEY;
+  if (!t) throw new Error("No GitHub token configured — code changes are unavailable.");
   return t;
+}
+
+export function codeChangesAvailable(): boolean {
+  return !!(process.env.GITHUB_TOKEN ?? process.env.GITHUB_API_KEY);
 }
 
 async function gh<T>(path: string, init?: RequestInit): Promise<T> {
@@ -196,4 +203,99 @@ export function branchNameFor(summary: string): string {
     .replace(/^-|-$/g, "")
     .slice(0, 40);
   return `agent/${slug || "change"}-${Date.now().toString(36)}`;
+}
+
+// --- build gate -------------------------------------------------------------
+//
+// Vercel reports each preview build back to GitHub as a check run, so the
+// build status is readable with the GitHub token we already hold. That is the
+// whole reason to read it this way: a Vercel API token would let this app
+// redeploy or delete projects, and the only question being asked here is
+// "did the build pass".
+
+export type ChangeStatus = {
+  branch: string;
+  prNumber: number;
+  state: "building" | "passed" | "failed" | "unknown";
+  previewUrl: string | null;
+  merged: boolean;
+  detail: string;
+};
+
+type CheckRun = {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  details_url: string | null;
+};
+
+export async function checkAndMerge(branch: string): Promise<ChangeStatus> {
+  const prs = await gh<
+    { number: number; head: { sha: string }; merged_at: string | null; state: string }[]
+  >(`/repos/${OWNER}/${REPO}/pulls?head=${OWNER}:${branch}&state=all`);
+  const pr = prs[0];
+  if (!pr) throw new Error(`No pull request found for ${branch}.`);
+
+  if (pr.merged_at) {
+    return {
+      branch,
+      prNumber: pr.number,
+      state: "passed",
+      previewUrl: null,
+      merged: true,
+      detail: "Already merged.",
+    };
+  }
+
+  const checks = await gh<{ check_runs: CheckRun[] }>(
+    `/repos/${OWNER}/${REPO}/commits/${pr.head.sha}/check-runs`,
+  );
+  const runs = checks.check_runs;
+  const preview = runs.find((r) => r.details_url)?.details_url ?? null;
+
+  if (runs.length === 0) {
+    return {
+      branch,
+      prNumber: pr.number,
+      state: "unknown",
+      previewUrl: null,
+      merged: false,
+      detail: "No build has been reported yet — it may not have started.",
+    };
+  }
+  if (runs.some((r) => r.status !== "completed")) {
+    return {
+      branch,
+      prNumber: pr.number,
+      state: "building",
+      previewUrl: preview,
+      merged: false,
+      detail: "The build is still running.",
+    };
+  }
+  const failed = runs.filter((r) => r.conclusion !== "success" && r.conclusion !== "neutral");
+  if (failed.length) {
+    return {
+      branch,
+      prNumber: pr.number,
+      state: "failed",
+      previewUrl: preview,
+      merged: false,
+      detail: `The build failed (${failed.map((f) => f.name).join(", ")}). Nothing was changed.`,
+    };
+  }
+
+  // Green. Merge into the sandbox branch, which triggers the sandbox deploy.
+  await gh(`/repos/${OWNER}/${REPO}/pulls/${pr.number}/merge`, {
+    method: "PUT",
+    body: JSON.stringify({ merge_method: "squash" }),
+  });
+  return {
+    branch,
+    prNumber: pr.number,
+    state: "passed",
+    previewUrl: preview,
+    merged: true,
+    detail: "The build passed and the change is now live on the sandbox site.",
+  };
 }

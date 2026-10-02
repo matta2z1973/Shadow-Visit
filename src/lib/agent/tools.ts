@@ -34,6 +34,7 @@ import {
   proposeChange,
   branchNameFor,
   canWrite,
+  checkAndMerge,
   BASE_BRANCH,
 } from "./repo";
 
@@ -401,10 +402,16 @@ const toolList: ToolDef[] = [
       );
 
       const limit = input.maxFiles ?? 12;
+      // Hard cap on files opened, not just on hits. A rare pattern would
+      // otherwise read every file in the repo one request at a time and eat
+      // the whole 60s function budget before the model gets to reply.
+      const SCAN_CAP = 70;
+      const scanned = files.slice(0, SCAN_CAP);
+      const truncated = files.length > SCAN_CAP;
       const hits: { path: string; lines: { n: number; text: string }[] }[] = [];
       // Sequential on purpose: a parallel fan-out over the whole tree would
       // burn the GitHub rate limit and the 60s budget on one search.
-      for (const f of files) {
+      for (const f of scanned) {
         if (hits.length >= limit) break;
         let content: string;
         try {
@@ -419,7 +426,18 @@ const toolList: ToolDef[] = [
         }
         if (matched.length) hits.push({ path: f.path, lines: matched });
       }
-      return { result: { pattern: input.pattern, searched: files.length, hits }, status: "ok" };
+      return {
+        result: {
+          pattern: input.pattern,
+          searched: scanned.length,
+          truncated,
+          hits,
+          ...(truncated
+            ? { note: "Only part of the codebase was searched. Narrow it with a prefix if you did not find what you need." }
+            : {}),
+        },
+        status: "ok",
+      };
     },
   },
 
@@ -474,6 +492,31 @@ const toolList: ToolDef[] = [
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not open the pull request.";
+        return { result: { error: message }, status: "error", message };
+      }
+    },
+  },
+
+  {
+    name: "check_change_status",
+    description:
+      "Check whether a proposed code change has finished building, and publish it to the sandbox site if the build passed. Builds take a minute or two, so after proposing a change tell the admin you will check back, then call this when they next ask. If the build failed, read the files again and fix the problem — never try to publish a failed build.",
+    schema: z.object({
+      branch: z.string().describe("The branch returned by propose_code_change."),
+    }),
+    write: true,
+    preview: (input: { branch: string }) => `Check the build for ${input.branch}`,
+    run: async (input: { branch: string }) => {
+      try {
+        const status = await checkAndMerge(input.branch);
+        return {
+          result: status,
+          after: status.merged ? { merged: status.branch, pr: status.prNumber } : undefined,
+          status: status.state === "failed" ? "error" : "ok",
+          message: status.detail,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not check the build.";
         return { result: { error: message }, status: "error", message };
       }
     },
