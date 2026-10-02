@@ -547,50 +547,106 @@ export function previewFor(name: string, input: unknown): string {
   }
 }
 
-// Minimal zod -> JSON Schema. The tool schemas here are deliberately flat
-// (objects of primitives, enums and optionals), so a full converter would be
-// a dependency carrying far more than this needs. Anything more elaborate
-// should be flattened rather than handled here.
+// Minimal zod -> JSON Schema.
+//
+// Hand-rolled to avoid a dependency, which is fine only as long as it covers
+// every construct the tool schemas actually use. It previously had no array
+// case and fell through to {type:"string"}, so propose_code_change advertised
+// its `files` parameter as a string: the model sent a string, zod rejected
+// it, and the failure read as a model error when it was the schema lying.
+// scripts/test-agent-schemas.ts now asserts every tool round-trips, so an
+// unhandled construct fails a test instead of one live tool call.
 function zodToJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
-  const shape = (schema as z.ZodObject<z.ZodRawShape>).shape ?? {};
-  const properties: Record<string, unknown> = {};
-  const required: string[] = [];
-  for (const [key, raw] of Object.entries(shape)) {
-    let field = raw as z.ZodTypeAny;
-    let optional = false;
-    let description: string | undefined;
-    // Unwrap optional/describe wrappers to reach the base type.
-    for (let i = 0; i < 5; i++) {
-      const def = field._def as { typeName?: string; innerType?: z.ZodTypeAny; description?: string };
-      if (def.description) description = def.description;
-      if (def.typeName === "ZodOptional" || def.typeName === "ZodDefault") {
-        optional = true;
-        field = def.innerType as z.ZodTypeAny;
-        continue;
-      }
-      break;
+  return convert(schema);
+}
+
+// zod v3 and v4 disagree on where this information lives: v3 has a
+// `typeName` like "ZodArray"; v4 has a lowercase `type` discriminator like
+// "array" and puts an array's element on `element`. This project is on v4,
+// but reading both costs nothing and survives an upgrade either way.
+type ZodDefLike = {
+  typeName?: string;
+  type?: string;
+  innerType?: z.ZodTypeAny;
+  element?: z.ZodTypeAny;
+  values?: string[];
+  description?: string;
+};
+
+// Peel optional/default/describe wrappers off until a concrete type is left.
+function unwrap(field: z.ZodTypeAny): {
+  base: z.ZodTypeAny;
+  optional: boolean;
+  description?: string;
+} {
+  let optional = false;
+  let description: string | undefined;
+  let current = field;
+  for (let i = 0; i < 8; i++) {
+    const def = current._def as unknown as ZodDefLike;
+    if (def.description) description = def.description;
+    // Must go through typeNameOf, not def.typeName: on zod v4 typeName is
+    // undefined and every wrapper would fall straight through unstripped.
+    const name = typeNameOf(current);
+    if (name === "ZodOptional" || name === "ZodDefault" || name === "ZodNullable") {
+      optional = true;
+      const inner = def.innerType ?? (current as unknown as { unwrap?: () => z.ZodTypeAny }).unwrap?.();
+      if (!inner) break;
+      current = inner;
+      continue;
     }
-    const def = field._def as { typeName?: string; values?: string[] };
-    let json: Record<string, unknown>;
-    switch (def.typeName) {
-      case "ZodString":
-        json = { type: "string" };
-        break;
-      case "ZodNumber":
-        json = { type: "integer" };
-        break;
-      case "ZodBoolean":
-        json = { type: "boolean" };
-        break;
-      case "ZodEnum":
-        json = { type: "string", enum: def.values ?? [] };
-        break;
-      default:
-        json = { type: "string" };
-    }
-    if (description) json.description = description;
-    properties[key] = json;
-    if (!optional) required.push(key);
+    break;
   }
-  return { type: "object", properties, required, additionalProperties: false };
+  return { base: current, optional, description };
+}
+
+function typeNameOf(t: z.ZodTypeAny): string {
+  const def = t._def as unknown as ZodDefLike;
+  if (typeof def.typeName === "string") return def.typeName;
+  if (typeof def.type === "string") {
+    return "Zod" + def.type.charAt(0).toUpperCase() + def.type.slice(1);
+  }
+  return "unknown";
+}
+
+function convert(t: z.ZodTypeAny): Record<string, unknown> {
+  const def = t._def as unknown as ZodDefLike;
+  const name = typeNameOf(t);
+  switch (name) {
+    case "ZodString":
+      return { type: "string" };
+    case "ZodNumber":
+      return { type: "integer" };
+    case "ZodBoolean":
+      return { type: "boolean" };
+    case "ZodEnum": {
+      const values =
+        def.values ?? Object.values((t as unknown as { options?: string[] }).options ?? {});
+      return { type: "string", enum: values };
+    }
+    case "ZodArray": {
+      const element =
+        def.element ?? (t as unknown as { element?: z.ZodTypeAny }).element;
+      if (!element) throw new Error("ZodArray with no element type");
+      return { type: "array", items: convert(element) };
+    }
+    case "ZodObject": {
+      const shape = (t as z.ZodObject<z.ZodRawShape>).shape;
+      const properties: Record<string, unknown> = {};
+      const required: string[] = [];
+      for (const [key, raw] of Object.entries(shape)) {
+        const { base, optional, description } = unwrap(raw as z.ZodTypeAny);
+        const json = convert(base);
+        if (description) json.description = description;
+        properties[key] = json;
+        if (!optional) required.push(key);
+      }
+      return { type: "object", properties, required, additionalProperties: false };
+    }
+    default:
+      // Fail loudly. Silently emitting {type:"string"} is what caused the
+      // original bug — a wrong schema the model cannot see is worse than a
+      // crash at startup.
+      throw new Error(`zodToJsonSchema: unhandled zod type ${name}`);
+  }
 }
