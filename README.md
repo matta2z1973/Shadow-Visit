@@ -168,6 +168,118 @@ season. "Create default test hosts" seeds 4 of them (grades 9-12, mixed
 gender, 7 classes + 1 free block each) with courses picked to keyword-match
 the built-in test prospective data from `scripts/seed-testdata.ts`.
 
+## The admin assistant (architecture)
+
+**Sandbox only.** Not on `main`, not in production. Lives at
+`/admin/assistant`, admin-gated.
+
+The goal: an admissions administrator describes an outcome in their own
+words and the change happens, without a developer in the loop.
+
+### Why it works the way it does
+
+The agent runs inside a Vercel serverless function. It has **no writable
+filesystem, no git, no way to run a build, and 60 seconds**. So it cannot
+edit the application it is running inside. Every code change goes out
+through the GitHub API as a branch and a pull request, and **Vercel's build
+of that branch is the gate**. A broken edit fails the build and goes
+nowhere — wasted, never dangerous.
+
+```
+admin describes an outcome
+  → triage: settings / code / needs-a-developer
+  → settings  : tool writes to app_settings, audited, immediate
+  → code      : search → read → propose_code_change
+                 → branch + PR → Vercel builds it
+                 → check_change_status → merge iff the build passed
+                 → sandbox site updates
+```
+
+### Files
+
+| Path | What it is |
+|---|---|
+| `src/app/admin/assistant/` | chat page + client component |
+| `src/app/api/assistant/route.ts` | SSE streaming route, runs the tool loop |
+| `src/lib/agent/system-prompt.ts` | standing instructions, including triage |
+| `src/lib/agent/tools.ts` | the 11 tools + zod → JSON Schema converter |
+| `src/lib/agent/repo.ts` | GitHub access **and the path policy** |
+| `scripts/test-agent-policy.ts` | 23 assertions on the path policy |
+| `scripts/test-agent-schemas.ts` | every tool's schema round-trips |
+
+Tables: `agent_conversations`, `agent_messages`, `agent_actions`. Messages
+store **raw Anthropic content blocks, not flattened text** — the API is
+stateless and the thread is replayed every turn, so flattening would break
+the next turn, not merely degrade the transcript. `agent_actions` records
+before/after on every write; that is both the audit log and the data an
+undo would need.
+
+Model is `claude-opus-5-5`, adaptive thinking, effort `high`. Streaming is
+not cosmetic: it keeps the admin seeing progress inside the 60s ceiling.
+
+### The security boundary is `repo.ts`, not the prompt
+
+A prompt can be argued with. The path policy cannot. Three categories are
+refused for both reading and writing:
+
+1. **Authentication and the sandbox gate** — `auth.ts`, `supabase/`,
+   `proxy.ts`, `login/`, `auth/`, `sandbox.ts`. A mistake here is the one
+   thing you cannot walk back.
+2. **The agent's own code** — `src/lib/agent/**`, which includes the tools,
+   the system prompt and the policy file itself. *An agent that can edit its
+   own guardrails has no guardrails.* This is the one that matters most.
+3. **Secrets, CI, dependencies, DB schema** — `.env*`, `.github/`,
+   `package.json`, `next.config.ts`, `db/schema.ts`, `drizzle/`. They carry
+   credentials, run outside the build gate, or need a migration a preview
+   deploy won't catch.
+
+Writes additionally require an **allowlist** match (pages, components,
+styles, non-auth lib code, `public/`), so a path nobody anticipated is
+refused rather than permitted. `main` is not a parameter anywhere in the
+module — it cannot be reached by any input. Run
+`npx tsx scripts/test-agent-policy.ts` after touching any of this.
+
+Two further limits worth keeping:
+
+- **The agent can count students but cannot read individual records.** That
+  keeps it useful for configuration while preventing text a student typed
+  from becoming an instruction that exfiltrates anything through a tool
+  result. The system prompt separately tells it to treat all database text
+  as data, never instructions.
+- **There is no "run SQL" tool and there should not be one.** The blast
+  radius is the union of what the typed tools do, not what Postgres can do.
+
+### Triage
+
+Every request is classified and the admin is told which bucket, in plain
+words:
+
+- **Settings** — a value it can change now.
+- **Code** — a software change it can make itself, via the pipeline above.
+- **Needs a developer** — auth, schema, secrets, its own code. Not a matter
+  of judgement: the policy physically refuses those files.
+
+The tiebreak is explicit in the prompt: **when unsure between the last two,
+escalate.** Over-escalating costs a delay; under-escalating costs an
+admissions season.
+
+### Required environment (sandbox project only)
+
+`ANTHROPIC_API_KEY` (or an Anthropic key in `app_settings` via Settings →
+AI) and `GITHUB_TOKEN` (`GITHUB_API_KEY` is also accepted). Without the
+GitHub token the code tools fail cleanly and the settings tools still work.
+**Production has neither, deliberately.**
+
+### Gotchas that cost real time
+
+- Vercel reports builds to GitHub as a **commit status**, not a check run.
+  The only check run is the comment bot and it is not a build signal.
+- The generated tool JSON Schema must actually match the zod schema. When
+  it doesn't, the model sends what it was told to and the failure looks like
+  a model mistake. That is what `test-agent-schemas.ts` exists to catch.
+- A turn that reads several files and proposes a change lands at roughly
+  55–60s. On Hobby that is the ceiling.
+
 ## Deployment
 
 Live at **https://shadow-visit-platform.vercel.app** (Vercel project
@@ -194,10 +306,40 @@ created 2026-08-25 — first deploy ever for this repo, via `vercel link` +
 - `.env.local` gained a `VERCEL_OIDC_TOKEN` line from `vercel link` — a
   Vercel-issued local-dev token, harmless, still git-ignored like everything
   else in that file.
-- This deploy reaches the **same live Supabase project** used for local dev
-  — there's only one environment, not separate prod/dev databases. Real
-  student data flows through both equally; there's no staging DB to test
-  against instead.
+- This deploy reaches the **same live Supabase project** used for local dev.
+  Real student data flows through both equally.
+
+### Two environments (since 2026-10-02)
+
+The "there's only one environment" note above is no longer true. There are
+now two, and they share nothing but the GitHub repo:
+
+| | Production | Sandbox |
+|---|---|---|
+| URL | shadow-visit-platform.vercel.app | shadow-visit-sandbox.vercel.app |
+| Branch | `main` | `sandbox/agent` |
+| Vercel project | `shadow-visit-platform` | `shadow-visit-sandbox` |
+| Supabase | `shadow-visit-use1` (us-east-1) | `shadow-visit` (us-west-2) |
+| Data | real students | seeded test data |
+| Email | Resend, live | no key; `sendEmail` refuses |
+
+Isolation is enforced in three independent places, so one mistake isn't
+enough to cross over: the sandbox project's production branch is
+`sandbox/agent`; it carries a build-ignore rule that exits early on any
+other ref; and the production project only ever deploys `main`.
+
+**`sandbox/agent` is a strict superset of `main`.** It was branched from
+`main` and `main` has not moved since, so everything on production is also
+in the sandbox. Merging the other direction has not been done and is a
+deliberate decision, not an oversight — see item 21.
+
+**Caveat:** the production Vercel project still builds *branch previews* for
+every branch, including the agent's. Those previews fail (they have none of
+the sandbox env vars) and show up as red commit statuses on the PRs. They
+are previews only — `main` is untouched and deploys normally — but they
+waste Hobby build minutes and are confusing. Fix is an ignored-build-step on
+the production project restricting it to `main`; not applied yet because it
+changes production configuration.
 
 ## Local environment quirks (hard-won, don't re-debug these)
 
@@ -1006,7 +1148,265 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
       it — Outlook's "Publish a calendar" screen has a **Reset links**
       button that invalidates it. Do that.
 
+17. **Hosts roster rebuilt as a sortable, filterable table** (2026-10-01,
+    commits `c4b3153` / `0bb2577` / `94fbd6f` / `88ac63f` — all on `main`,
+    live in production).
+    - Was one always-open card per host with its edit form, calendar field
+      and full interest checklist expanded. Fine for a handful of hosts,
+      unreadable at 247.
+    - Now one row per host: first name, last name, grade, gender, Outlook
+      calendar link, visits against the soft cap, interest count. An
+      explicit **Edit ▾ / Close ▴** button opens a drawer with everything
+      that used to be inline. Nothing an admin could do was removed.
+    - The Edit button replaced two earlier affordances (a bare chevron plus
+      the interest count rendered as a button). The count-as-button read as
+      "expand the interests," which undersold a drawer that edits the name,
+      grade, gender, active flag, calendar link and interests and deletes
+      the host.
+    - Sort by first name, last name or grade. **Rows with no value for the
+      sorted column sink to the bottom in both directions** — flipping the
+      arrow is meant to reverse the hosts you can see, not bury them under
+      a block of blanks.
+    - Filters: grade pills (built from grades actually present), gender,
+      calendar link saved / not, and a grouped interests multi-select. With
+      two or more interests picked an **any/all** toggle appears — "who
+      could cover either of these?" and "who covers both?" are different
+      questions and both get asked when staffing a visit.
+    - Name search matches each whitespace-separated word independently
+      against first/last/full name, so "okafor amara", "amara okafor" and
+      "oka am" all find the same person.
+    - Row checkboxes + **Copy emails**, joining with `"; "` (what Outlook
+      and Gmail accept in To:). Email lives on `profiles`, not
+      `host_students`, so the roster query gained a left join; admin-created
+      rows with no claimed profile contribute no address and the toolbar
+      says how many, rather than silently copying fewer than you selected.
+    - Selection survives filter changes on purpose (filter grade 11, select
+      all, switch to grade 12, select all, copy both), with a "N hidden by
+      filters" note so that can't be a silent surprise.
+    - Sorting and filtering are client-side: the page already loads the
+      whole roster (the interests filter needs every host's links anyway),
+      so a server round trip per click would be slower and would close the
+      open drawer.
+
+18. **Why so many host records have only a name — diagnosed, not yet fixed**
+    (2026-10-01). Investigation, no code change. The finding matters more
+    than any of it looked:
+
+    `getOrCreateHost` is called from `/me`'s **page load**
+    (`src/app/me/page.tsx`), not from a form submit. So the sequence is:
+    verify code → `/` → `/me` → **row created with names only** → close the
+    tab → that row persists forever. The grade/gender/interests requirement
+    (item 7's successor, commit `50a7463`) lives in `saveMe`, which only
+    runs on submit. **The row is created by arriving, not by registering.**
+
+    Measured against production:
+
+    | Stage | Count |
+    |---|---|
+    | Student profiles that exist | 271 |
+    | …never reached `/me` (no host row at all) | 35 |
+    | Host rows created | 236 |
+    | …submitted grade + gender | 208 |
+    | …also saved a calendar link (fully complete) | 155 |
+
+    - 26 of the 29 incomplete rows submitted nothing at all; 3 saved a
+      calendar link but never the profile form.
+    - All 29 have both names, zero `(unknown)` — consistent with the
+      auth-profile copy, not with bad data entry.
+    - **One of the 29 is an admin account**: "View as student" redirects to
+      `/me`, which calls `getOrCreateHost`, so previewing the student portal
+      silently manufactures a host row for yourself.
+    - **83 hosts have no `ics_url`** (79 of them with an email to contact).
+      Not the same group as the 29 — it includes 53 students who completed
+      their profile and stopped at the Outlook step.
+    - Drop-off is a steady ~10–20% per week, unchanged before and after the
+      2026-09-04 requirement commit, so nothing regressed.
+
+    Probable cause of the calendar drop-off: item 7 moved "My schedule"
+    *above* "My interests", so the first thing a student sees is the hardest
+    thing (leave the site, be on a desktop, complete a 5-step Outlook flow),
+    and the 30-second part is below it. The 3 who saved a link but no
+    profile are the mirror image.
+
+    **Not yet done:** create the host row on first submit rather than page
+    load; a completeness column/filter on the roster so "started, never
+    finished" reads as a status instead of corrupt data; and a decision on
+    the existing 29.
+
+19. **A second, fully isolated environment: the sandbox** (2026-10-02,
+    commit `ed18611`). Built so the agent work in item 21 could not touch
+    anything live. See "Two environments" under Deployment for the layout.
+    Three code changes were needed before the app could safely run twice:
+
+    - **`PG_VECTOR_TYPE_OID` is now an env var**, defaulting to production's
+      `17174`. The OID is assigned per database when the extension is
+      created and the sandbox reports **19175** — the hardcoded constant
+      would have put the sandbox silently onto the slow unregistered-type
+      path that once made `select * from interests` take two minutes. A
+      startup probe now compares the configured value against the live
+      database and logs loudly on mismatch. The probe is **fire-and-forget
+      with its own timeout, deliberately**: an awaited query at module-init
+      gates every request the function serves, which is the exact bug the
+      old dynamic OID lookup caused.
+    - **`sendEmail()` hard-stops when `NEXT_PUBLIC_APP_ENV=sandbox`.** Mail
+      goes to `SANDBOX_EMAIL_SINK` with the intended recipient moved into
+      the subject, or it doesn't send. There is no path from the sandbox to
+      a real family's inbox even if real addresses reach its database.
+      **This covers app mail only** — Supabase Auth sends sign-in codes
+      itself and never touches `sendEmail`, so the sandbox *will* email you
+      a login code.
+    - **A sandbox banner in the root layout.** Two deployments that look
+      identical is how someone edits live records thinking they're testing.
+
+    The sandbox DB is the dormant `shadow-visit` us-west-2 project (22 test
+    hosts from July, old schema), wiped and rebuilt. Schema was generated
+    offline with `drizzle-kit generate` and applied through Supabase's
+    Management API addressed by project ref, so no tool in the process ever
+    held a connection string that could reach production. Seeded with
+    `scripts/seed.ts` + `scripts/seed-testdata.ts`; no production data was
+    copied.
+
+    Also `6369996`: a **sandbox-only sign-in** that skips the emailed code,
+    gated on three conditions that must all hold and which production
+    satisfies none of (`NEXT_PUBLIC_APP_ENV=sandbox`, a `SANDBOX_QUICK_LOGIN`
+    secret, and the Supabase URL naming the sandbox project ref). The third
+    is the one a stray env var can't defeat. It doesn't forge a session — it
+    mints a real magic-link token via the admin API and redeems it
+    server-side. The gate lives in a **server layout**, so in production the
+    panel's markup is never sent to the browser rather than hidden with CSS,
+    and the server action re-checks independently because an unrendered
+    button is not an access control.
+
+20. **`bootstrap.sql` was demoting both admins to student** (2026-10-02,
+    commit `72a63dc`). Real latent bug, found standing up the sandbox.
+
+    The file's header declares only two emails may auto-provision as admin
+    and `handle_new_auth_user()` honours it — but the backfill twelve lines
+    below hardcoded `'student'` for every profile it created. It only fires
+    when `auth.users` rows predate their profiles, which is not exotic:
+    `auth.users` lives in the `auth` schema, so resetting only `public`
+    leaves every account intact, the AFTER INSERT trigger never fires for
+    them, and the backfill then creates their profiles as students. Both
+    admins get locked out of `/admin` with no error anywhere.
+
+    **`SETUP.md` tells you to run this file after migrations.** Running it
+    against production during a restore or region move would have demoted
+    you and Fran. Now the backfill applies the same rule as the trigger,
+    carries `first_name`/`last_name` it was silently dropping, and has a
+    one-way repair pass so running the file fixes an already-broken
+    database. Verified idempotent. Production profiles were checked and were
+    never affected.
+
+21. **The admin assistant — an in-app agent that can change the codebase**
+    (2026-10-02, commits `51eca82`, `a326b1c`, `6f85374`, `af2f134`,
+    `f32f595`). **Sandbox only; not on `main`, not in production.** The goal
+    is an admissions administrator making changes without a developer. See
+    "The admin assistant" section below for the architecture; this entry is
+    the log.
+
+    Built in order: chat UI + tool loop + audit trail → repo read/write →
+    build-gated auto-merge. Two bugs were found by running it, both in the
+    harness rather than the model, and both invisible to types, lint and
+    build:
+
+    - **The tool schema was lying to the model** (`af2f134`). The
+      hand-rolled zod → JSON Schema converter had no array case and fell
+      through to `{type:"string"}`, so `propose_code_change` advertised its
+      `files` parameter (an array of `{path, content}`) as a string. The
+      model sent a string, zod rejected it, and the failure read as a model
+      error. The default branch now throws instead of guessing, and
+      `scripts/test-agent-schemas.ts` round-trips all 11 tools.
+    - **The build gate was unsound** (`f32f595`). It read GitHub *check
+      runs*; the only check run on these commits is "Vercel Preview
+      Comments", the bot that posts the preview link, which reports success
+      the moment it comments regardless of whether anything compiled. The
+      real build reports as a *commit status*, never read. On the first real
+      PR the states were comment-bot `success` / sandbox build `pending` —
+      it would have merged. Now reads commit statuses, filtered to this
+      project (the production project also builds branch previews and posts
+      its own status).
+
+    **First autonomous change: PR #1, "Add a per-user light/dark mode
+    toggle"** (merged as `479a72a`). Asked for dark mode, the agent searched
+    the codebase and reported, unprompted: *"every page already has dark
+    colours built in. They were switched off on purpose."* It had found item
+    13 — 363 `dark:` utilities across 40 files, made inert by
+    `@custom-variant dark (&:where(.dark, .dark *))`. It wrote 4 files
+    (new `src/components/theme-toggle.tsx` plus `globals.css`, `layout.tsx`,
+    `site-nav.tsx`), opened the PR, waited for the build, merged it, and
+    described the result in plain language. Verified in a browser:
+    `<html class="…dark">`, body background `rgb(10,10,10)`, toggle in the
+    nav.
+
+    That episode is also the argument for repo access generally. Before it,
+    the same request got a correct but uninformed "that's a change to the
+    software, I can write it up" — the agent could not know the work was
+    nearly done, so any write-up would have scoped it ~10× too big.
+
+22. **Known issues and what's next** (as of 2026-10-02).
+
+    - **Vercel Hobby's 60s function ceiling is the binding constraint on
+      the agent.** The first dark-mode turn *completed the work* — it
+      reached `propose_code_change` at ~58s — then was killed before it
+      could reply, so the admin saw silence. It took a second turn to
+      report. Vercel Pro ($20/mo) raises this to 300s and is the single
+      biggest quality-of-life fix. Hobby also caps cron at 2 jobs at daily
+      granularity, which is why the deploy window below is nightly.
+    - **The production project builds agent branch previews and they fail.**
+      Noise and wasted build minutes; see the caveat under Deployment.
+    - **The GitHub token reaches three repos**, not one: Shadow-Visit,
+      Benefits-Analyzer, coverage-planner. `src/lib/agent/repo.ts` hardcodes
+      the repo so the agent cannot reach the others, but a token leak would
+      expose them. Worth narrowing.
+    - **Sandbox `host_soft_cap` is 3, production is 5** — left over from
+      testing the agent's first write. The environments have diverged.
+    - **Writes are confirmed conversationally, not enforced.** The agent
+      asks, you answer, it acts, and the UI reports it as done. For
+      reversible audited settings that's fine. Before anything like this
+      reaches production it needs to be a real gate the user clicks.
+    - **"1haven't saved a calendar link"** — missing space in the hosts page
+      summary pill, visible once the count is non-zero. Cosmetic.
+
+    Not built yet: the nightly deploy window and promotion queue; a
+    production promotion path at all (nothing merges to `main`
+    automatically, by design, and that decision has not been revisited);
+    undo, despite `agent_actions` already recording the before/after data
+    for it; and promoting the hardcoded matching tunables
+    (`FREE_PERIOD_PENALTY`, `OVER_CAP_PENALTY`,
+    `MS_SCHEDULE_MATCHING_ENABLED`, `SIMILARITY_THRESHOLD`) into settings so
+    more requests resolve as config instead of code.
+
 ## Git status
+
+### Current (2026-10-02)
+
+Two branches, both pushed, working tree clean.
+
+| Branch | Head | Deploys to | Contains |
+|---|---|---|---|
+| `main` | `88ac63f` | production | everything through item 17 |
+| `sandbox/agent` | `479a72a` | sandbox | the above **plus** items 19–21 |
+
+`sandbox/agent` is a strict superset of `main` — branched from it, and
+`main` has not moved since. **Nothing has been merged back to `main`**,
+which is deliberate: the sandbox, the quick-login bypass and the agent
+should not reach production without a separate decision.
+
+Two commits on the sandbox branch are good candidates to cherry-pick to
+`main` on their own, because they fix real latent bugs in production code
+and carry no sandbox or agent dependency:
+
+- `ed18611` — the `PG_VECTOR_TYPE_OID` env var and its startup probe. Turns
+  a silent performance cliff into a log line. (The email guard and banner
+  in the same commit are inert in production, where the env vars are unset.)
+- `72a63dc` — the `bootstrap.sql` backfill that demotes both admins. See
+  item 20; `SETUP.md` tells you to run that file.
+
+Untracked-and-ignored working files (real data, see Secrets): `Screenshots/`,
+`host ICS.ics`, `host schedule by block.xls`, `Test Report-test.xlsx`,
+`PRD Notes.docx`.
+
+### Historical
 
 **Fully committed and pushed to `origin/main`** as of 2026-09-04, through
 commit `8a53341` ("Split MS/US matching, decouple candidacy from calendar
@@ -1130,8 +1530,40 @@ detail.
 1. `cd "Shadow Visit Platform"`, confirm `.env.local` still has the values
    described above (it should, it's git-ignored and untouched by clone/pull).
 2. `npm install` if `node_modules` is missing.
-3. `npm run dev -- -p 3001`, open http://localhost:3001.
-4. Sign in as `abbondanziom@greenhill.org` — lands on `/admin` (real role is
+3. **Check which branch you're on.** `main` is production; `sandbox/agent`
+   has the agent work and deploys to the sandbox. They are not the same app.
+4. `npm run dev -- -p 3001`, open http://localhost:3001.
+5. Sign in as `abbondanziom@greenhill.org` — lands on `/admin` (real role is
    `admin`). Use the "View as student" nav button to see the student side.
-5. Check the Backlog section above for what's next; check Git status above
-   for what's uncommitted.
+6. Check the Backlog section above for what's next; check Git status above
+   for branch state.
+
+**`.env.local` points at production.** Every CLI script here calls
+`process.loadEnvFile(".env.local")`, so `npm run db:push`, `db:seed` and
+anything importing `src/lib/db` will hit the **real student database**
+unless you override it. A shell variable does win — verified — so to work
+against the sandbox:
+
+```bash
+DATABASE_URL="<sandbox pooler url>" PG_VECTOR_TYPE_OID=19175 npx tsx scripts/...
+```
+
+Safer still for schema work: generate DDL offline with `drizzle-kit
+generate` and apply it through Supabase's Management API addressed by
+project ref, which is how the sandbox was built — no tool in that process
+ever holds a connection string that can reach production.
+
+### Agent work specifically
+
+- Read "The admin assistant (architecture)" above first, especially the
+  path policy. It is the security boundary.
+- After touching `src/lib/agent/**`, run both:
+  ```bash
+  npx tsx scripts/test-agent-policy.ts
+  DATABASE_URL="postgresql://notused:notused@127.0.0.1:1/none" npx tsx scripts/test-agent-schemas.ts
+  ```
+  (The dead connection string is intentional — the schema test imports the
+  db module but never queries, and this guarantees it cannot reach a real
+  database.)
+- The agent's own PRs appear on the repo as `agent/*` branches targeting
+  `sandbox/agent`. PR #1 is an example worth reading.
