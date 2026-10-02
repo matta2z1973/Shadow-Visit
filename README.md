@@ -23,6 +23,33 @@ Built on the same stack as the school's coverage-planner app.
   covers *this specific local environment's* state and *what's changed since
   clone*.
 
+> ## ⚠ This branch's README stops at item 16 (2026-10-02)
+>
+> Active development has moved to the **`sandbox/agent`** branch, which is a
+> strict superset of `main` and deploys to a separate environment
+> (shadow-visit-sandbox.vercel.app, its own Supabase project, seeded test
+> data). **Read that branch's README** for items 17–22 and the architecture
+> of the in-app admin assistant. Nothing from it has been merged here, by
+> design.
+>
+> Two things on this branch are known-stale as a result:
+>
+> - The Deployment section below says "there's only one environment, not
+>   separate prod/dev databases." That is no longer true.
+> - **`drizzle/bootstrap.sql` on this branch has a real bug**: its backfill
+>   hardcodes `'student'`, so running it against a database whose
+>   `auth.users` rows predate their profiles demotes *both* admins and locks
+>   them out of `/admin` with no error. `SETUP.md` tells you to run that
+>   file. Fixed on `sandbox/agent` in commit `72a63dc`; worth cherry-picking
+>   here on its own, along with `ed18611` (makes the hardcoded pgvector OID
+>   an env var and adds a startup probe, turning a silent performance cliff
+>   into a log line).
+>
+> Also live in production but not yet written up here: the Hosts roster was
+> rebuilt as a sortable, filterable table with name search and bulk email
+> copy (commits `c4b3153`, `0bb2577`, `94fbd6f`, `88ac63f`) — documented as
+> item 17 on `sandbox/agent`.
+
 ## Current status (as of last update)
 
 > The bullets immediately below are historical (dated 2026-08-26/27) and
