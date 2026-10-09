@@ -40,7 +40,7 @@ export default async function ProspectivesUploadPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-10">
+    <main className="mx-auto w-full max-w-6xl px-6 py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Prospective students</h1>
 
       <ProspectivesTabs active="upload" />
@@ -48,14 +48,14 @@ export default async function ProspectivesUploadPage() {
       <section className={`${card} mt-6`}>
         <h2 className="text-lg font-semibold">Prospective students (FinalSite)</h2>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Upload a FinalSite bulk report (.xlsx) — one row per applicant, covering
-          many students at once. Reads name, gender, grade, current school, visit
-          date, and up to two ranked interests (the paired &ldquo;Involvement&rdquo;
-          columns are proficiency levels and aren&rsquo;t used). Any row missing
-          gender is flagged after upload — fill it in on the prospective&rsquo;s
-          record before matching runs (gender is a hard filter). Re-uploading
-          updates anyone already on file (matched by name + grade) instead of
-          duplicating them.
+          Upload a FinalSite bulk report (.xlsx, .xls or .csv) — one row per applicant. Nothing
+          is saved straight away: you&rsquo;ll see every student as <strong>new</strong>,
+          <strong> changed</strong> (with what&rsquo;s on file now) or <strong>unchanged</strong>,
+          can edit any field, and then apply. Students already on file are matched by first
+          and last name and updated in place, so re-uploading never duplicates them, and
+          anyone not in the new file is left alone. If FinalSite renames a column, fix it
+          under <em>Column mapping</em> and tick &ldquo;remember&rdquo; so the next upload
+          picks it up.
         </p>
         <ProspectiveReportUploadForm />
       </section>

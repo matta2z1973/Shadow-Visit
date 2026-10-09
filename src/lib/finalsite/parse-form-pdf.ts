@@ -136,6 +136,21 @@ export function parseHumanDate(raw: string | null): {
     const mon = MONTHS[dm[1].slice(0, 3).toLowerCase()];
     if (mon) date = `${dm[3]}-${mon}-${dm[2].padStart(2, "0")}`;
   }
+  // Numeric dates, as a CSV export or an Excel date cell renders them:
+  // "2026-10-14", "10/14/2026", "10/14/26" (US month-first).
+  if (!date) {
+    const iso = raw.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+    const us = raw.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})\b/);
+    let y: number | null = null, m = 0, d = 0;
+    if (iso) [y, m, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+    else if (us) {
+      [m, d] = [Number(us[1]), Number(us[2])];
+      y = us[3].length === 2 ? 2000 + Number(us[3]) : Number(us[3]);
+    }
+    if (y && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      date = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+  }
   const times = raw.match(/(\d{1,2}:\d{2}\s*[AP]M)/gi) ?? [];
   const start = times[0] ? to24h(times[0]) : null;
   const end = times[1] ? to24h(times[1]) : null;
