@@ -1412,12 +1412,24 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
       (`finalsite_report_columns`) on apply. Precedence: this upload's pick →
       remembered → built-in alias → fuzzy guess. A remembered header absent
       from a later file falls back to the normal rules.
+    - **Interest matching** (`interest-matching.ts`). Production renamed most
+      sports to drop the team gender ("Soccer"), FinalSite still sends
+      "Soccer (boys/girls)", and exact matching silently dropped 6 of the 23
+      interests in the October export. Now: this upload's pick → remembered
+      pick → exact name → name with team-gender words and punctuation
+      stripped → word containment, guessing only when exactly one interest
+      fits (so "Art" is left unmatched, not guessed). An "Interest matching"
+      panel lists every value in the file with its student count and match;
+      the admin can repoint it or mark it "Don't import" and re-read.
+      "Remember" stores the pick by interest **id** in `app_settings`
+      (`finalsite_interest_values`), so renaming the interest later doesn't
+      break it.
     - Files: `src/lib/finalsite/prospective-import.ts` (pure diff logic, used
       by both client and server), `column-mapping.ts`,
-      `read-report-file.ts`,
+      `read-report-file.ts`, `interest-matching.ts`,
       `src/app/admin/uploads/{prospective-report-actions.ts,
       prospective-report-upload-form.tsx, prospective-import-preview.tsx,
-      column-mapping-panel.tsx}`.
+      column-mapping-panel.tsx, interest-values-panel.tsx}`.
     - Verified: parser + diff logic against the real export (15 checks), the
       transaction/rollback against the sandbox DB, typecheck, lint,
       `next build`. **Not yet clicked through in a browser.**
