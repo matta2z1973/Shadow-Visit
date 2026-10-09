@@ -1376,6 +1376,52 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
     `MS_SCHEDULE_MATCHING_ENABLED`, `SIMILARITY_THRESHOLD`) into settings so
     more requests resolve as config instead of code.
 
+23. **FinalSite upload: review-before-apply, update-in-place, and column
+    mapping** (2026-10-09, sandbox branch, not yet committed).
+    - **Gender wasn't importing.** FinalSite renamed `Gender` to
+      `preferred_pronoun` (still `M`/`F`). The fuzzy matcher read it as
+      *preferred name*, so every row got a blank gender and a display name of
+      "M Lastname". Added the alias; the fuzzy "preferred" keyword is now
+      "preferred name" so it can't steal a pronoun column. `Interest 3`/`4`
+      are read too (they were silently dropped).
+    - **`.xlsx`, `.xls` and `.csv` all accepted** — the picker only allowed
+      `.xlsx`, so FinalSite's `.xls` export was greyed out. All three go
+      through `src/lib/finalsite/read-report-file.ts`: CSVs are decoded as
+      UTF-8 or, failing that, Windows-1252 (Excel's default CSV encoding on
+      Windows), with any byte-order mark stripped so the first header still
+      matches; real Excel date cells become "Oct 14, 2026"; and
+      `parseHumanDate` now also reads `10/14/2026`, `10/14/26`, `2026-10-14`.
+      Tested by generating every variant from the real export and requiring
+      identical parse output across UTC, US and NZ time zones.
+    - **Two steps.** Upload now only *previews*
+      (`previewProspectiveReport`, writes nothing). Each row shows New /
+      Changes / No change, every field is editable, changed fields show the
+      value on file, and "Apply N changes" (`applyProspectiveImport`) writes
+      everything in one transaction. The apply action re-validates the
+      payload with zod rather than trusting the browser.
+    - **Matching is by first + last name, not name + grade.** The old key
+      made a duplicate whenever a grade was corrected in FinalSite. Grade
+      only breaks ties between same-name records; the admin can override the
+      pick or choose "Add as new". Students missing from the file are never
+      touched. A row whose student already has a match is flagged when its
+      date/grade/gender changes, since the match isn't moved.
+    - **Column mapping.** The review screen lists every platform field, the
+      file column it read and how (remembered / matched / guessed / missing),
+      plus unused file columns. The admin can repoint a field and re-read the
+      file; "remember" saves the new header to `app_settings`
+      (`finalsite_report_columns`) on apply. Precedence: this upload's pick →
+      remembered → built-in alias → fuzzy guess. A remembered header absent
+      from a later file falls back to the normal rules.
+    - Files: `src/lib/finalsite/prospective-import.ts` (pure diff logic, used
+      by both client and server), `column-mapping.ts`,
+      `read-report-file.ts`,
+      `src/app/admin/uploads/{prospective-report-actions.ts,
+      prospective-report-upload-form.tsx, prospective-import-preview.tsx,
+      column-mapping-panel.tsx}`.
+    - Verified: parser + diff logic against the real export (15 checks), the
+      transaction/rollback against the sandbox DB, typecheck, lint,
+      `next build`. **Not yet clicked through in a browser.**
+
 ## Git status
 
 ### Current (2026-10-02)
