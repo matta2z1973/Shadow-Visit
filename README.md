@@ -45,6 +45,13 @@ Built on the same stack as the school's coverage-planner app.
 >   an env var and adds a startup probe, turning a silent performance cliff
 >   into a log line).
 >
+> **Also on this branch (2026-10-09):** the FinalSite upload rework —
+> gender read from the renamed `preferred_pronoun` column, `.xlsx`/`.xls`/
+> `.csv` accepted, a review-and-edit step before anything is saved, students
+> matched by name (not name + grade) so re-uploads update in place, and a
+> column-mapping panel that can remember renamed columns. Written up as
+> item 23 on `sandbox/agent`, where it landed first.
+>
 > Also live in production but not yet written up here: the Hosts roster was
 > rebuilt as a sortable, filterable table with name search and bulk email
 > copy (commits `c4b3153`, `0bb2577`, `94fbd6f`, `88ac63f`) — documented as
