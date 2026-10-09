@@ -50,13 +50,13 @@ export default function ColumnMappingPanel({
           If FinalSite renamed a column, pick the column it&rsquo;s called now and re-read the
           file. Tick &ldquo;remember&rdquo; to use the new name on every future upload.
         </p>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="mt-3 overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800">
+          <table className="w-full text-sm [&_td]:px-3">
             <thead>
-              <tr className="text-left text-xs text-zinc-500">
-                <th className="py-1 pr-3 font-medium">Platform field</th>
-                <th className="py-1 pr-3 font-medium">Column in the file</th>
-                <th className="py-1 font-medium">Status</th>
+              <tr className="bg-forest text-left text-base font-bold text-white">
+                <th className="px-3 py-2.5">Platform field</th>
+                <th className="px-3 py-2.5">Column in the file</th>
+                <th className="px-3 py-2.5">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
