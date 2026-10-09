@@ -64,3 +64,6 @@ next-env.d.ts
 
 # Claude Code session config (user-specific)
 .claude/
+
+# Real exports with student data (FinalSite reports etc.) — never commit
+Docs/
