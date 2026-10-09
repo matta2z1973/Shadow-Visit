@@ -8,7 +8,9 @@ import {
 } from "./prospective-report-actions";
 import ProspectiveImportPreview from "./prospective-import-preview";
 import ColumnMappingPanel from "./column-mapping-panel";
+import InterestValuesPanel from "./interest-values-panel";
 import { NOT_IN_FILE } from "@/lib/finalsite/prospective-import";
+import { IGNORE_INTEREST } from "@/lib/finalsite/interest-matching";
 
 const initial: ProspectivePreviewResult = {
   ok: false,
@@ -19,6 +21,7 @@ const initial: ProspectivePreviewResult = {
   interestOptions: [],
   fileNames: [],
   mapping: null,
+  interestValues: [],
 };
 
 // Step 1 uploads and previews (nothing saved); step 2 is the review table,
@@ -29,6 +32,7 @@ export default function ProspectiveReportUploadForm() {
   const [closedPreviewId, setClosedPreviewId] = useState<string | null>(null);
   const [applied, setApplied] = useState<ApplyImportResult | null>(null);
   const [remember, setRemember] = useState(false);
+  const [rememberInterestPicks, setRememberInterestPicks] = useState(false);
   const [formKey, setFormKey] = useState(0);
 
   const open = state.previewId !== "" && state.previewId !== closedPreviewId;
@@ -38,6 +42,7 @@ export default function ProspectiveReportUploadForm() {
     setClosedPreviewId(state.previewId);
     setApplied(result);
     setRemember(false);
+    setRememberInterestPicks(false);
     setFormKey((k) => k + 1); // clears the file input and column picks
   }
 
@@ -51,6 +56,16 @@ export default function ProspectiveReportUploadForm() {
             .map((f) => [f.field, f.chosen === NOT_IN_FILE ? null : f.chosen]),
         )
       : null;
+
+  // Only interests the admin explicitly picked. "Automatic" isn't sent, so a
+  // remembered pick stays until the admin chooses something else for it.
+  const rememberInterests = rememberInterestPicks
+    ? Object.fromEntries(
+        state.interestValues
+          .filter((v) => v.chosen !== "")
+          .map((v) => [v.key, v.chosen === IGNORE_INTEREST ? IGNORE_INTEREST : v.chosen]),
+      )
+    : null;
 
   return (
     <div>
@@ -84,6 +99,16 @@ export default function ProspectiveReportUploadForm() {
             onRememberChange={setRemember}
           />
         ) : null}
+        {open ? (
+          <InterestValuesPanel
+            key={`i-${state.previewId}`}
+            values={state.interestValues}
+            options={state.interestOptions}
+            pending={pending}
+            remember={rememberInterestPicks}
+            onRememberChange={setRememberInterestPicks}
+          />
+        ) : null}
       </form>
 
       {applied ? (
@@ -111,6 +136,7 @@ export default function ProspectiveReportUploadForm() {
           key={state.previewId}
           preview={state}
           rememberColumns={rememberColumns}
+          rememberInterests={rememberInterests}
           onDone={(r) => close(r)}
           onCancel={() => close(null)}
         />
