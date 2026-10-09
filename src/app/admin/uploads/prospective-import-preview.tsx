@@ -33,11 +33,13 @@ const input =
 export default function ProspectiveImportPreview({
   preview,
   rememberColumns,
+  rememberInterests,
   onDone,
   onCancel,
 }: {
   preview: ProspectivePreviewResult;
   rememberColumns: Record<string, string | null> | null;
+  rememberInterests: Record<string, string | null> | null;
   onDone: (result: ApplyImportResult) => void;
   onCancel: () => void;
 }) {
@@ -117,6 +119,7 @@ export default function ProspectiveImportPreview({
       const result = await applyProspectiveImport({
         fileNames: preview.fileNames,
         rememberColumns,
+        rememberInterests,
         rows: toApply.map((d) => ({
           targetId: d.edit.targetId,
           values: d.edit.values,

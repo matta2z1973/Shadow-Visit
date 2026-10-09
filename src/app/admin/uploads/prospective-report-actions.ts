@@ -19,14 +19,24 @@ import {
   type ColumnOverrides,
   type ReportFieldKey,
 } from "@/lib/finalsite/parse-prospective-report";
-import { getSavedColumns, saveColumns } from "@/lib/finalsite/column-mapping";
+import {
+  getSavedColumns,
+  getSavedInterestValues,
+  saveColumns,
+  saveInterestValues,
+} from "@/lib/finalsite/column-mapping";
+import {
+  IGNORE_INTEREST,
+  matchInterestValue,
+  normInterestValue,
+  type InterestMatchSource,
+} from "@/lib/finalsite/interest-matching";
 import { isSupportedReportFile, readReportFile } from "@/lib/finalsite/read-report-file";
 import {
   INTEREST_SLOTS,
   NOT_IN_FILE,
   composeFullName,
   nameKey,
-  normName,
   pickDefaultTarget,
   rowStatus,
   type ExistingCandidate,
@@ -67,6 +77,19 @@ export type ProspectivePreviewResult = {
   interestOptions: InterestOption[];
   fileNames: string[];
   mapping: ColumnMappingView | null; // from the first readable file
+  interestValues: InterestValueView[]; // every distinct interest text in the upload
+};
+
+// One distinct interest value from the file, for the review screen's
+// interest panel. `chosen` echoes this upload's pick ("" = automatic).
+export type InterestValueView = {
+  key: string; // normalized text — also the form field suffix (ival:<key>)
+  value: string; // as first seen in the file
+  count: number; // students listing it
+  interestId: string | null;
+  source: InterestMatchSource;
+  savedId: string | null;
+  chosen: string;
 };
 
 // What the review screen's column-mapping panel shows: for every platform
@@ -113,7 +136,14 @@ export async function previewProspectiveReport(
 ): Promise<ProspectivePreviewResult> {
   await requireAdmin();
   const previewId = crypto.randomUUID();
-  const empty = { previewId, rows: [], interestOptions: [], fileNames: [], mapping: null };
+  const empty = {
+    previewId,
+    rows: [],
+    interestOptions: [],
+    fileNames: [],
+    mapping: null,
+    interestValues: [],
+  };
   const files = formData
     .getAll("files")
     .filter((f): f is File => f instanceof File && f.size > 0);
@@ -160,7 +190,33 @@ export async function previewProspectiveReport(
   }
   let mapping: ColumnMappingView | null = null;
 
-  const interestByName = new Map(allInterests.map((i) => [normName(i.name), i.id]));
+  // Interest values: this upload's picks (ival:<normalized text>), then
+  // remembered ones, then exact / fuzzy name matching. Resolved once per
+  // distinct value and cached, so every row with "Soccer (boys/girls)" agrees.
+  let savedInterests: Record<string, string> = {};
+  try {
+    savedInterests = await getSavedInterestValues();
+  } catch (err) {
+    console.error("previewProspectiveReport: couldn't load saved interest values", err);
+  }
+  const chosenInterests = new Map<string, string>();
+  for (const [k, v] of formData.entries()) {
+    if (k.startsWith("ival:") && typeof v === "string" && v !== "") chosenInterests.set(k.slice(5), v);
+  }
+  const interestRefs = allInterests.map((i) => ({ id: i.id, name: i.name }));
+  const interestValueViews = new Map<string, InterestValueView>();
+  const resolveInterest = (value: string) => {
+    const key = normInterestValue(value);
+    let view = interestValueViews.get(key);
+    if (!view) {
+      const chosen = chosenInterests.get(key) ?? "";
+      const m = matchInterestValue(value, interestRefs, { chosen, saved: savedInterests[key] });
+      view = { key, value, count: 0, interestId: m.interestId, source: m.source, savedId: savedInterests[key] ?? null, chosen };
+      interestValueViews.set(key, view);
+    }
+    view.count++;
+    return view;
+  };
   const withMatches = new Set(matched.map((m) => m.prospectiveId));
   const interestsByProspective = new Map<string, (string | null)[]>();
   for (const pi of existingInterests) {
@@ -240,9 +296,10 @@ export async function previewProspectiveReport(
         const unmapped: string[] = [];
         const ids: string[] = [];
         for (const pick of r.interests) {
-          const id = interestByName.get(normName(pick.name));
-          if (!id) unmapped.push(pick.name);
-          else if (!ids.includes(id)) ids.push(id);
+          const v = resolveInterest(pick.name);
+          if (v.interestId) {
+            if (!ids.includes(v.interestId)) ids.push(v.interestId);
+          } else if (v.source !== "ignored") unmapped.push(pick.name);
         }
         const values: ImportValues = {
           firstName: r.firstName ?? "",
@@ -303,6 +360,12 @@ export async function previewProspectiveReport(
       .map((i) => ({ id: i.id, name: i.name, category: i.category, active: i.active }))
       .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name)),
     fileNames: files.map((f) => f.name),
+    // Unmatched first, then guesses to check, then the rest — what needs a
+    // look sits at the top.
+    interestValues: [...interestValueViews.values()].sort((a, b) => {
+      const rank = (v: InterestValueView) => (!v.interestId && v.source !== "ignored" ? 0 : v.source === "fuzzy" ? 1 : 2);
+      return rank(a) - rank(b) || a.value.localeCompare(b.value);
+    }),
   };
 }
 
@@ -337,6 +400,15 @@ const applySchema = z.object({
       z.string().max(300).nullable(),
     )
     .nullable(),
+  // Interest picks to remember: normalized file text → interest id or
+  // IGNORE_INTEREST, or null to forget the remembered one.
+  rememberInterests: z
+    .record(
+      z.string().max(300),
+      z.union([z.string().uuid(), z.literal(IGNORE_INTEREST)]).nullable(),
+    )
+    .nullable()
+    .optional(),
   rows: z
     .array(
       z.object({
@@ -357,7 +429,7 @@ export async function applyProspectiveImport(input: ApplyImportInput): Promise<A
   if (!parsed.success) {
     return { ok: false, message: `Couldn't apply — invalid data: ${parsed.error.issues[0]?.message ?? "unknown"}` };
   }
-  const { rows, fileNames, rememberColumns } = parsed.data;
+  const { rows, fileNames, rememberColumns, rememberInterests } = parsed.data;
   if (rows.length === 0) return { ok: false, message: "No changes selected." };
 
   for (const r of rows) {
@@ -459,6 +531,9 @@ export async function applyProspectiveImport(input: ApplyImportInput): Promise<A
       if (rememberColumns && Object.keys(rememberColumns).length) {
         await saveColumns(rememberColumns, tx);
       }
+      if (rememberInterests && Object.keys(rememberInterests).length) {
+        await saveInterestValues(rememberInterests, tx);
+      }
 
       return { created: newRows.length, updated };
     });
@@ -473,6 +548,9 @@ export async function applyProspectiveImport(input: ApplyImportInput): Promise<A
         `Saved — ${result.created} added, ${result.updated} updated.` +
         (rememberColumns && Object.keys(rememberColumns).length
           ? " Column choices remembered for future uploads."
+          : "") +
+        (rememberInterests && Object.keys(rememberInterests).length
+          ? " Interest choices remembered for future uploads."
           : ""),
     };
   } catch (err) {
