@@ -1040,6 +1040,57 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
       it — Outlook's "Publish a calendar" screen has a **Reset links**
       button that invalidates it. Do that.
 
+23. **Row-Level Security was off on every table — a live data exposure**
+    (2026-10-20, commit `80d8597`). Triggered by a Supabase advisor email,
+    but the exposure was worse than the email described.
+
+    Supabase serves every `public` table over PostgREST, authorised by the
+    anon key — which is `NEXT_PUBLIC`, so it ships inside the browser
+    bundle of a public site. With RLS off and Supabase's default grants,
+    that key was full access. Measured against production before the fix,
+    using nothing but that key:
+
+    | Table | Rows readable by anyone |
+    |---|---|
+    | `profiles` | 328 (names, emails) |
+    | `host_students` | 275 (grades, genders, calendar URLs) |
+    | `prospective_students` | 8 |
+
+    `anon` also held SELECT, INSERT, UPDATE, DELETE **and TRUNCATE** on all
+    22 tables. Not just readable — deletable, by anyone who viewed source.
+
+    Fixed on both Shadow Visit projects: RLS enabled on every table, no
+    policies. Verified after: anon reads 0 rows, an anon insert returns 401,
+    the app's own role still reads all 328 profiles, and the site is healthy.
+
+    **Why this didn't break the app**, checked rather than assumed: it never
+    calls `supabase.from()` (the Supabase client is auth-only — signInWithOtp,
+    verifyOtp, getUser, signOut), and all data goes through Drizzle as
+    `postgres`, which owns every table and has `rolbypassrls = true`.
+    `scripts/enable-rls.ts` refuses to run if any table has a different
+    owner, since that guarantee would not hold. **If this app ever starts
+    reading through PostgREST, those tables will need real policies.**
+
+    TRUNCATE was revoked separately: **RLS policies are not applied to
+    TRUNCATE**, so enabling RLS alone would have left that privilege usable.
+
+    `scripts/audit-rls.ts` (read-only) found the same problem across the
+    other Supabase projects on this account, two of them worse:
+
+    - **whatsnext-pitchoff** — 30 tables open, including `Session` (165
+      rows) and `VerificationToken` (79). Publicly readable session tokens
+      are an account-takeover vector, not just a leak. Fixed.
+    - **coverage-planner** — 10 tables open including `profiles`. Fixed.
+    - **TrialsFinder.Ai** — one table, `spatial_ref_sys`. That is PostGIS's
+      own public reference data, not user data; left alone deliberately.
+
+    Both apps verified still serving afterwards (both are Prisma, which
+    connects directly rather than through PostgREST).
+
+    **Standing rule:** `drizzle-kit push` creates tables with RLS off and
+    full anon grants. Every new table needs `scripts/enable-rls.ts` run
+    against it. See SETUP.md.
+
 ## Git status
 
 **Fully committed and pushed to `origin/main`** as of 2026-09-04, through

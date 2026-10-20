@@ -39,6 +39,29 @@ npm run db:push     # create tables from src/lib/db/schema.ts
 npm run db:seed     # seed interests, US block grid, default settings
 ```
 
+### Every new table needs RLS — `db:push` does not do it
+
+Supabase serves every table in `public` over PostgREST at
+`<ref>.supabase.co/rest/v1/<table>`, authorised by the anon key, which is
+`NEXT_PUBLIC` and therefore sits in the browser bundle of a public site.
+A table created by `drizzle-kit push` has **RLS off and full grants to
+anon**: readable *and writable* by anyone who views source. This was live on
+production until 2026-10-20 (README item 23).
+
+After adding any table:
+
+```bash
+npx tsx scripts/enable-rls.ts <project-ref>          # dry run
+npx tsx scripts/enable-rls.ts <project-ref> --apply
+npx tsx scripts/audit-rls.ts                         # read-only, all projects
+```
+
+No policies are needed: with RLS on and none defined, anon and authenticated
+are denied everything, while `postgres` (which owns the tables and has
+`rolbypassrls`) is how the app connects. **This only holds while the app
+never calls `supabase.from()`** — the Supabase client here is auth-only. If
+that ever changes, the tables it reads will need real policies.
+
 ## 4. Make yourself an admin
 
 Sign in once (creates your `profiles` row), then in Supabase SQL editor:
