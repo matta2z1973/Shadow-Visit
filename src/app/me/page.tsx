@@ -4,7 +4,7 @@ import { hostStudentInterests, interests } from "@/lib/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import { INTEREST_CATEGORIES } from "@/lib/interest-categories";
 import { getOrCreateHost } from "@/lib/hosts";
-import InterestsForm from "./interests-form";
+import ProfileForm from "./profile-form";
 import ScheduleLinkForm from "./schedule-link-form";
 import PageLoadError from "@/components/page-load-error";
 
@@ -43,13 +43,17 @@ export default async function MePage() {
   })).filter((g) => g.items.length > 0);
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">My interests</h1>
-      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-        Tell us a bit about yourself so we can match you with the right shadow
-        visitors.
-      </p>
-
+    <main className="mx-auto w-full max-w-3xl px-6 pb-10">
+      {/* ProfileForm owns the heading and the sticky Save info bar; the
+          schedule box below is passed through as children so it can sit
+          between that bar and the fields without being nested inside the
+          form element (it is a form of its own). */}
+      <ProfileForm
+        host={{ grade: host.grade, gender: host.gender }}
+        groups={groups}
+        selectedIds={selectedIds}
+        hasSchedule={!!host.icsUrl}
+      >
       <div className="mt-6 rounded-lg border border-zinc-200 p-5 dark:border-zinc-800">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">My schedule</h2>
@@ -70,15 +74,7 @@ export default async function MePage() {
         </p>
         <ScheduleLinkForm currentUrl={host.icsUrl} />
       </div>
-
-      <div className="mt-10 border-t border-zinc-200 pt-6 dark:border-zinc-800">
-        <InterestsForm
-          host={{ grade: host.grade, gender: host.gender }}
-          groups={groups}
-          selectedIds={selectedIds}
-          hasSchedule={!!host.icsUrl}
-        />
-      </div>
+      </ProfileForm>
     </main>
   );
 }
