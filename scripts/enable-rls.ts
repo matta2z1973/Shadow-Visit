@@ -28,6 +28,8 @@
 //   SUPABASE_ACCESS_TOKEN=... npx tsx scripts/enable-rls.ts <project-ref> [--apply]
 // Without --apply it only reports what it would do.
 
+export {}; // module scope: these scripts share top-level names
+
 const ref = process.argv[2];
 const apply = process.argv.includes("--apply");
 

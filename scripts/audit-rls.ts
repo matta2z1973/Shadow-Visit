@@ -4,6 +4,8 @@
 //
 //   SUPABASE_ACCESS_TOKEN=... npx tsx scripts/audit-rls.ts
 
+export {}; // module scope: these scripts share top-level names
+
 const token = process.env.SUPABASE_ACCESS_TOKEN;
 if (!token) {
   console.error("SUPABASE_ACCESS_TOKEN is not set");
