@@ -1087,6 +1087,24 @@ yet, only the env vars exist. Don't assume this is fixed without re-checking
     Both apps verified still serving afterwards (both are Prisma, which
     connects directly rather than through PostgREST).
 
+    **Follow-up, same day.** With RLS on, the advisor surfaced
+    `public.handle_new_auth_user()` as a SECURITY DEFINER function callable
+    by `anon` over `/rest/v1/rpc/`. Not actually exploitable — PostgREST
+    returns 404 because the function returns `trigger` and never enters the
+    schema cache — but EXECUTE is revoked anyway. Note it had to be revoked
+    from **PUBLIC**, not just anon/authenticated: the ACL read
+    `=X/postgres`, and a leading empty grantee means PUBLIC, so revoking
+    the named roles alone changed nothing. Verified afterwards that signup
+    still works by creating and deleting a throwaway auth user on the
+    sandbox and confirming the trigger wrote its profile row — a trigger
+    does not re-check EXECUTE at fire time, only at creation.
+
+    **Left alone deliberately:** `rls_enabled_no_policy` (INFO, x22/x25) is
+    the intended design, not a gap. `extension_in_public` (pgvector) would
+    mean moving the extension and changing its OID, which this app pins —
+    not worth it. `auth_leaked_password_protection` concerns passwords,
+    and sign-in here is OTP only.
+
     **Standing rule:** `drizzle-kit push` creates tables with RLS off and
     full anon grants. Every new table needs `scripts/enable-rls.ts` run
     against it. See SETUP.md.
